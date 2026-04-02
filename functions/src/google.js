@@ -4,6 +4,9 @@
 const { google } = require('googleapis');
 const { defineSecret } = require('firebase-functions/params');
 
+const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
+const client = new SecretManagerServiceClient();
+
 // Секрет с JSON-ключом сервисного аккаунта
 const GOOGLE_SERVICE_ACCOUNT_JSON = defineSecret('GOOGLE_SERVICE_ACCOUNT_JSON');
 
@@ -17,8 +20,21 @@ class GoogleService {
     async init() {
         if (this.auth) return;
 
-        const rawJson = GOOGLE_SERVICE_ACCOUNT_JSON.value();
-        if (!rawJson) throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON is missing in secrets!");
+        let rawJson;
+        try {
+            rawJson = GOOGLE_SERVICE_ACCOUNT_JSON.value();
+        } catch (e) {
+            console.log("Secret value not accessible via Firebase Params, trying direct Secret Manager API...");
+            try {
+                const [version] = await client.accessSecretVersion({
+                    name: `projects/659700409826/secrets/GOOGLE_SERVICE_ACCOUNT_JSON/versions/latest`,
+                });
+                rawJson = version.payload.data.toString();
+            } catch (err) {
+                console.error("Direct Secret Manager access failed:", err);
+                throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON is missing and inaccessible!");
+            }
+        }
 
         let key;
         try {
