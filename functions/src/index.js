@@ -1,5 +1,6 @@
-// Trigger deploy: 2026-04-03 (Permissions granted)
+// Trigger deploy: 2026-04-03 (All permissions granted)
 const { onRequest } = require('firebase-functions/v2/https');
+
 
 
 const { Telegraf } = require('telegraf');
