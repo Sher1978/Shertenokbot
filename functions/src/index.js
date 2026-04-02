@@ -59,7 +59,7 @@ function getBot() {
 // Экспортируем функцию с явным указанием секретов
 exports.bot = onRequest({ 
     region: "us-central1",
-    secrets: [TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, GOOGLE_SERVICE_ACCOUNT_JSON] 
+    secrets: [TELEGRAM_BOT_TOKEN, GEMINI_API_KEY] 
 }, async (req, res) => {
     try {
         const bot = getBot();
