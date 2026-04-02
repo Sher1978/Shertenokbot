@@ -1,8 +1,20 @@
 const { GoogleGenAI, Type } = require('@google/genai');
+const { defineSecret } = require('firebase-functions/params');
 const db = require('./db');
 
-const apiKey = process.env.GEMINI_API_KEY;
-const genAI = apiKey ? new GoogleGenAI(apiKey) : null;
+// Определяем секрет (он будет загружен из Google Cloud Secret Manager)
+const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
+
+let genAI = null;
+
+function getAI() {
+    if (!genAI) {
+        const key = GEMINI_API_KEY.value();
+        if (!key) throw new Error("GEMINI_API_KEY is not configured in secrets.");
+        genAI = new GoogleGenAI(key);
+    }
+    return genAI;
+}
 
 
 const PROMPT = `Ты персональный AI-помощник, секретарь и компаньон для своего пользователя.
@@ -71,7 +83,7 @@ async function processMessage(userId, message) {
     const contents = [...history, { role: 'user', parts: [{ text: message }] }];
     
     try {
-        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const model = getAI().getGenerativeModel({ model: 'gemini-1.5-flash' });
 
         
         const result = await model.generateContent({
