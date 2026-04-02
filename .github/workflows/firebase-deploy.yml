@@ -15,10 +15,6 @@ jobs:
           node-version: 20
       - name: Install dependencies
         run: cd functions && npm install
-      - name: Create .env file
-        run: |
-          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" >> functions/.env
-          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> functions/.env
       - name: Deploy to Firebase
         uses: w9jds/firebase-action@v15.10.1
         with:
