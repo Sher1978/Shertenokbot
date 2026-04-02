@@ -1,7 +1,9 @@
 const { GoogleGenAI, Type } = require('@google/genai');
 const db = require('./db');
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const apiKey = process.env.GEMINI_API_KEY;
+const genAI = apiKey ? new GoogleGenAI(apiKey) : null;
+
 
 const PROMPT = `Ты персональный AI-помощник, секретарь и компаньон для своего пользователя.
 Его тип личности — 'Гексли'. Он отлично ведет переговоры и креативит, но ему тяжело дается системная, монотонная работа и отслеживание задач.
@@ -69,7 +71,8 @@ async function processMessage(userId, message) {
     const contents = [...history, { role: 'user', parts: [{ text: message }] }];
     
     try {
-        const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
         
         const result = await model.generateContent({
             contents,
