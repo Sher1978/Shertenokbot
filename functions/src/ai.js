@@ -1,17 +1,16 @@
-const { GoogleGenAI, Type } = require('@google/genai');
-const { defineSecret } = require('firebase-functions/params');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const db = require('./db');
-
-// Определяем секрет (он будет загружен из Google Cloud Secret Manager)
-const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
+const { getSecret } = require('./secrets');
 
 let genAI = null;
 
-function getAI() {
+/**
+ * Инициализирует Gemini AI асинхронно.
+ */
+async function getAI() {
     if (!genAI) {
-        const key = GEMINI_API_KEY.value();
-        if (!key) throw new Error("GEMINI_API_KEY is not configured in secrets.");
-        genAI = new GoogleGenAI(key);
+        const key = await getSecret('GEMINI_API_KEY');
+        genAI = new GoogleGenerativeAI(key);
     }
     return genAI;
 }
@@ -35,11 +34,11 @@ const tools = [{
             name: 'add_task',
             description: 'Добавляет новую задачу.',
             parameters: {
-                type: Type.OBJECT,
+                type: 'object',
                 properties: {
-                    title: { type: Type.STRING, description: 'Название задачи' },
-                    project: { type: Type.STRING, description: 'Название проекта' },
-                    deadline: { type: Type.STRING, description: 'Дедлайн' }
+                    title: { type: 'string', description: 'Название задачи' },
+                    project: { type: 'string', description: 'Название проекта' },
+                    deadline: { type: 'string', description: 'Дедлайн' }
                 },
                 required: ['title']
             }
@@ -48,10 +47,10 @@ const tools = [{
             name: 'update_task_status',
             description: 'Меняет статус задачи.',
             parameters: {
-                type: Type.OBJECT,
+                type: 'object',
                 properties: {
-                    title: { type: Type.STRING, description: 'Точное название задачи' },
-                    status: { type: Type.STRING, description: 'Статус: completed или pending' }
+                    title: { type: 'string', description: 'Точное название задачи' },
+                    status: { type: 'string', description: 'Статус: completed или pending' }
                 },
                 required: ['title', 'status']
             }
@@ -60,10 +59,10 @@ const tools = [{
             name: 'add_project',
             description: 'Создает новый проект или обновляет существующий.',
             parameters: {
-                type: Type.OBJECT,
+                type: 'object',
                 properties: {
-                    name: { type: Type.STRING, description: 'Название проекта' },
-                    description: { type: Type.STRING, description: 'Описание, цели проекта' }
+                    name: { type: 'string', description: 'Название проекта' },
+                    description: { type: 'string', description: 'Описание, цели проекта' }
                 },
                 required: ['name', 'description']
             }
@@ -72,16 +71,16 @@ const tools = [{
             name: 'get_all_data',
             description: 'Получает список всех проектов и задач.',
             parameters: {
-                type: Type.OBJECT
+                type: 'object'
             }
         },
         {
             name: 'google_create_folder',
             description: 'Создает папку для проекта на Google Диске.',
             parameters: {
-                type: Type.OBJECT,
+                type: 'object',
                 properties: {
-                    name: { type: Type.STRING, description: 'Название папки (обычно название проекта)' }
+                    name: { type: 'string', description: 'Название папки (обычно название проекта)' }
                 },
                 required: ['name']
             }
@@ -90,10 +89,10 @@ const tools = [{
             name: 'google_create_reminder',
             description: 'Создает напоминание или событие в Google Календаре.',
             parameters: {
-                type: Type.OBJECT,
+                type: 'object',
                 properties: {
-                    title: { type: Type.STRING, description: 'Заголовок напоминания' },
-                    startTime: { type: Type.STRING, description: 'Время начала в формате ISO (например, 2024-04-03T10:00:00Z)' }
+                    title: { type: 'string', description: 'Заголовок напоминания' },
+                    startTime: { type: 'string', description: 'Время начала в формате ISO (например, 2024-04-03T10:00:00Z)' }
                 },
                 required: ['title', 'startTime']
             }
@@ -106,7 +105,8 @@ async function processMessage(userId, message) {
     const contents = [...history, { role: 'user', parts: [{ text: message }] }];
     
     try {
-        const model = getAI().getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const aiInstance = await getAI();
+        const model = aiInstance.getGenerativeModel({ model: 'gemini-1.5-flash' });
         const googleService = require('./google');
 
         const result = await model.generateContent({
