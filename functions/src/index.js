@@ -1,4 +1,6 @@
+// Trigger deploy: 2026-04-03
 const { onRequest } = require('firebase-functions/v2/https');
+
 const { Telegraf } = require('telegraf');
 const ai = require('./ai');
 
