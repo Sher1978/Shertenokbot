@@ -74,6 +74,29 @@ const tools = [{
             parameters: {
                 type: Type.OBJECT
             }
+        },
+        {
+            name: 'google_create_folder',
+            description: 'Создает папку для проекта на Google Диске.',
+            parameters: {
+                type: Type.OBJECT,
+                properties: {
+                    name: { type: Type.STRING, description: 'Название папки (обычно название проекта)' }
+                },
+                required: ['name']
+            }
+        },
+        {
+            name: 'google_create_reminder',
+            description: 'Создает напоминание или событие в Google Календаре.',
+            parameters: {
+                type: Type.OBJECT,
+                properties: {
+                    title: { type: Type.STRING, description: 'Заголовок напоминания' },
+                    startTime: { type: Type.STRING, description: 'Время начала в формате ISO (например, 2024-04-03T10:00:00Z)' }
+                },
+                required: ['title', 'startTime']
+            }
         }
     ]
 }];
@@ -84,8 +107,8 @@ async function processMessage(userId, message) {
     
     try {
         const model = getAI().getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const googleService = require('./google');
 
-        
         const result = await model.generateContent({
             contents,
             tools,
@@ -107,19 +130,25 @@ async function processMessage(userId, message) {
                         status: 'pending',
                         createdAt: new Date().toISOString()
                     });
-                    finalOutput += `📌 Задача "${args.title}" записана.\n`;
+                    finalOutput += `📌 Задача "${args.title}" записана в БД.\n`;
                 } else if (call.name === 'add_project') {
                     await db.addProject({
                         name: args.name,
                         description: args.description,
                         updatedAt: new Date().toISOString()
                     });
-                    finalOutput += `📁 Проект "${args.name}" обновлен/создан.\n`;
+                    finalOutput += `📁 Проект "${args.name}" создан в БД.\n`;
                 } else if (call.name === 'get_all_data') {
                     const data = await db.getDb();
                     const projectsList = data.projects.map(p => `- ${p.name}: ${p.description}`).join('\n');
                     const tasksList = data.tasks.filter(t => t.status === 'pending').map(t => `- [${t.project}] ${t.title}`).join('\n');
                     finalOutput += `📊 Твой срез:\n\nПРОЕКТЫ:\n${projectsList || 'Нет'}\n\nЗАДАЧИ:\n${tasksList || 'Нет'}\n`;
+                } else if (call.name === 'google_create_folder') {
+                    const folder = await googleService.createProjectFolder(args.name);
+                    finalOutput += `☁️ Папка проекта "${args.name}" создана на Google Диске (ID: ${folder.id}).\n`;
+                } else if (call.name === 'google_create_reminder') {
+                    const event = await googleService.addCalendarReminder(args.title, args.startTime);
+                    finalOutput += `📅 Напоминание "${args.title}" добавлено в Google Календарь.\n`;
                 }
             }
         }

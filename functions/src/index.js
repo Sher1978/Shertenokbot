@@ -7,6 +7,7 @@ const ai = require('./ai');
 // Определяем секреты (они будут загружены из Google Cloud Secret Manager)
 const TELEGRAM_BOT_TOKEN = defineSecret('TELEGRAM_BOT_TOKEN');
 const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
+const GOOGLE_SERVICE_ACCOUNT_JSON = defineSecret('GOOGLE_SERVICE_ACCOUNT_JSON');
 
 let botInstance = null;
 
@@ -58,7 +59,7 @@ function getBot() {
 // Экспортируем функцию с явным указанием секретов
 exports.bot = onRequest({ 
     region: "us-central1",
-    secrets: [TELEGRAM_BOT_TOKEN, GEMINI_API_KEY] 
+    secrets: [TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, GOOGLE_SERVICE_ACCOUNT_JSON] 
 }, async (req, res) => {
     try {
         const bot = getBot();
