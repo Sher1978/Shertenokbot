@@ -1,0 +1,16 @@
+# Библиотеки
+node_modules/
+
+# Собраные файлы
+lib/
+
+# Секреты и логи
+.env
+.env.*
+npm-debug.log*
+firebase-debug.log*
+
+# Исключаем временные файлы отладки и исправления
+fix_secrets.js
+clean_*.txt
+test.txt
