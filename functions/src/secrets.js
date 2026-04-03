@@ -52,6 +52,9 @@ async function getSecret(secretName) {
 function parseJsonSecret(secretContent) {
     if (!secretContent) return null;
     
+    // Diagnostic: Log length to catch truncation/mis-copying
+    console.log(`[Secrets] Received secret string of length: ${secretContent.length}`);
+    
     try {
         return JSON.parse(secretContent);
     } catch (err) {
