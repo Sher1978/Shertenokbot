@@ -239,8 +239,11 @@ async function processMessage(userId, message, fileData = null) {
     
     try {
         const genAIInstance = await getAI();
+        const modelName = "gemini-1.5-flash-latest";
+        console.log(`[AI] Using model: ${modelName}`);
+        
         const model = genAIInstance.getGenerativeModel({ 
-            model: "gemini-1.5-flash",
+            model: modelName,
             tools: tools,
             systemInstruction: dynamicPrompt
         });

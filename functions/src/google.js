@@ -15,28 +15,31 @@ class GoogleService {
 
         let key;
         try {
-            // 1. First, try to extract the JSON object with a regex to ignore any wrapping text/backticks
+            // Layer 1: Extraction logic (Regex) - Look for JSON anywhere in the string
             const match = rawJson.match(/\{[\s\S]*\}/);
-            if (!match) throw new Error("No curly braces found in secret string.");
-            
-            let jsonString = match[0];
-            
-            // 2. Try simple parse on the extracted part
+            let extracted = match ? match[0] : rawJson.trim();
+
             try {
-                key = JSON.parse(jsonString);
+                key = JSON.parse(extracted);
+                console.log(`[Google] Success: Found service account for ${key.client_email}`);
             } catch (innerErr) {
-                // 3. Fallback: handle common unescaped newline issues in the private_key specifically
-                // This is risky but often fixes manually pasted PKCS8 keys.
-                console.warn("[Google] Inner parse failed, trying character cleanup...");
-                // Keep only printable ASCII and common white space
-                const cleaned = jsonString.replace(/[^\x20-\x7E\r\n\t]/g, "");
-                key = JSON.parse(cleaned);
+                // Layer 2: Base64 fallback (common for manual secret storage)
+                console.log("[Google] Inner parse failed, trying Base64 decode...");
+                try {
+                    const decoded = Buffer.from(rawJson.trim(), 'base64').toString('utf8');
+                    const b64Match = decoded.match(/\{[\s\S]*\}/);
+                    key = JSON.parse(b64Match ? b64Match[0] : decoded);
+                    console.log(`[Google] Success via Base64: ${key.client_email}`);
+                } catch (b64Error) {
+                    console.error("[Google] CRITICAL: Service Account Secret parsing failed.");
+                    console.error(`[Google] Raw preview: ${rawJson.substring(0, 50).replace(/\n/g, " ")}...`);
+                    console.error(`[Google] Raw length: ${rawJson.length}`);
+                    throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON format error.");
+                }
             }
         } catch (e) {
-            console.error("[Google] CRITICAL: Service Account Secret parsing failed.");
-            console.error("[Google] Hint: Ensure GOOGLE_SERVICE_ACCOUNT_JSON in Secret Manager is valid JSON.");
-            console.error("[Google] Raw length:", rawJson ? rawJson.length : 0);
-            throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON format error.");
+            console.error("[Google] CRITICAL: Initialization failed:", e.message);
+            throw e;
         }
 
         this.auth = new google.auth.JWT(
