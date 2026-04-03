@@ -238,16 +238,15 @@ async function processMessage(userId, message, fileData = null) {
     const contents = [...history, { role: 'user', parts: userParts }];
     
     try {
-        const ai = await getAI();
-        const result = await ai.models.generateContent({
-            model: "models/gemini-1.5-flash",
-            contents,
-            config: {
-                tools: tools,
-                systemInstruction: { 
-                    parts: [{ text: dynamicPrompt }] 
-                }
-            }
+        const genAIInstance = await getAI();
+        const model = genAIInstance.getGenerativeModel({ 
+            model: "gemini-1.5-flash",
+            tools: tools,
+            systemInstruction: dynamicPrompt
+        });
+
+        const result = await model.generateContent({
+            contents: contents
         });
 
         // В новом SDK результат возвращается через response
@@ -393,10 +392,11 @@ async function processMessage(userId, message, fileData = null) {
         if (e.status === 404 || (e.response && e.response.status === 404) || e.message.includes('404')) {
             console.error("[AI] 404 Model Not Found. Listing available models...");
             try {
-                const aiInstance = await getAI();
-                const response = await aiInstance.models.list();
-                const modelNames = response.map(m => m.name);
-                console.error("[AI] Available models:", modelNames.join(", "));
+                const genAIInstance = await getAI();
+                // В SDK v1.x нет прямого метода list() у экземпляра, 
+                // обычно список моделей получается через fetch/REST или другую обертку.
+                // Пока просто залогируем факт ошибки 404.
+                console.error("[AI] 404 Model Not Found. Verification of model name 'gemini-1.5-flash' required.");
             } catch (listErr) {
                 console.error("[AI] Failed to list models:", listErr.message);
             }
