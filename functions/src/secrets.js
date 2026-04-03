@@ -65,7 +65,7 @@ function parseJsonSecret(secretContent) {
             console.log(`[Secrets] Success via Regex Extraction: ${emailMatch[1]}`);
             return {
                 client_email: emailMatch[1],
-                private_key: keyMatch[1]
+                private_key: keyMatch[1].replace(/\\n/g, '\n')
             };
         }
         

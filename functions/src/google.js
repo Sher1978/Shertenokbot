@@ -87,17 +87,22 @@ class GoogleService {
             throw e;
         }
 
-        const normalizedPem = this.normalizePem(key.private_key);
+        let normalizedPem = this.normalizePem(key.private_key);
 
-        // OpenSSL 3 fix for Node.js 17/18/20+: 
-        // The underlying 'jws' library (used by google-auth-library) can fail with 
-        // ERR_OSSL_UNSUPPORTED when given raw PEM strings for certain old-format keys.
-        // We MUST ensure the PEM is in a strictly valid format with proper newlines.
-        
-        // Validation check for Node 20 / OpenSSL 3 connectivity
+        // OpenSSL 3 / Node 20 "Key Washer": 
+        // Standardize the PEM format via KeyObject to ensure it follows strict PKCS#8 rules.
+        try {
+            const pk = createPrivateKey(normalizedPem);
+            normalizedPem = pk.export({ type: 'pkcs8', format: 'pem' }).toString();
+            console.log('[Google] Private key washed and standardized to PKCS#8.');
+        } catch (washErr) {
+            console.warn('[Google] Key Washer warning:', washErr.message);
+        }
+
+        // Validation check for Node 20 / OpenSSL 3 connectivity (Final Verification)
         try {
             const tempKey = createPrivateKey(normalizedPem);
-            console.log('[Google] Private key validation successful (decoded via crypto.createPrivateKey).');
+            console.log('[Google] Private key validation successful.');
         } catch (keyErr) {
             console.warn('[Google] Private key validation warning:', keyErr.message);
         }
