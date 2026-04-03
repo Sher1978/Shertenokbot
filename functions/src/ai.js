@@ -187,9 +187,12 @@ const tools = [{
 }];
 
 async function processMessage(userId, message, fileData = null) {
-    const history = await db.getHistory(userId);
-    const profile = await db.getUserProfile(userId);
-    
+    // Параллельно читаем историю и профиль — экономит ~300ms
+    const [history, profile] = await Promise.all([
+        db.getHistory(userId),
+        db.getUserProfile(userId)
+    ]);
+
     // ОПТИМИЗАЦИЯ: Пытаемся подгрузить "Прошивку" и "Внешнюю память" ПАРАЛЛЕЛЬНО
     let driveContext = "";
     try {
@@ -405,8 +408,11 @@ async function processMessage(userId, message, fileData = null) {
 
         if (!finalOutput) finalOutput = "Принято!";
 
-        await db.addHistory(userId, 'user', message);
-        await db.addHistory(userId, 'model', finalOutput);
+        // Batch write: одна пара read/write вместо двух — экономит ~400ms
+        await db.addHistoryBatch(userId, [
+            { role: 'user', parts: [{ text: message || '' }] },
+            { role: 'model', parts: [{ text: finalOutput }] }
+        ]);
 
         return finalOutput;
     } catch (e) {

@@ -1,4 +1,5 @@
 const { google } = require('googleapis');
+const { GoogleAuth } = require('google-auth-library');
 const { getSecret } = require('./secrets');
 
 class GoogleService {
@@ -84,16 +85,19 @@ class GoogleService {
             throw e;
         }
 
-        this.auth = new google.auth.JWT(
-            key.client_email,
-            null,
-            key.private_key,
-            ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/calendar']
-        );
+        // Use GoogleAuth instead of JWT to avoid OpenSSL 3 PKCS#1 incompatibility in Node.js 20
+        // JWT requires the legacy RSA format; GoogleAuth handles both PKCS#1 and PKCS#8 internally
+        this.auth = new GoogleAuth({
+            credentials: key,
+            scopes: [
+                'https://www.googleapis.com/auth/drive',
+                'https://www.googleapis.com/auth/calendar'
+            ]
+        });
 
         this.drive = google.drive({ version: 'v3', auth: this.auth });
         this.calendar = google.calendar({ version: 'v3', auth: this.auth });
-        console.log('Google Service authorized successfully.');
+        console.log(`[Google] Service authorized successfully as: ${key.client_email}`);
     }
 
     async createProjectFolder(projectName) {

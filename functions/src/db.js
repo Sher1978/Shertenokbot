@@ -41,10 +41,21 @@ async function getHistory(userId) {
 async function addHistory(userId, role, text) {
     const docRef = db.collection('history').doc(userId);
     const snap = await docRef.get();
-    let messages = [];
-    if (snap.exists) messages = snap.data().messages || [];
+    let messages = snap.exists ? (snap.data().messages || []) : [];
     
     messages.push({ role, parts: [{ text }] });
+    if (messages.length > 20) messages = messages.slice(-20);
+    
+    await docRef.set({ messages }, { merge: true });
+}
+
+// Записывает сразу несколько сообщений за одну пару read/write
+async function addHistoryBatch(userId, newMessages) {
+    const docRef = db.collection('history').doc(userId);
+    const snap = await docRef.get();
+    let messages = snap.exists ? (snap.data().messages || []) : [];
+    
+    messages.push(...newMessages);
     if (messages.length > 20) messages = messages.slice(-20);
     
     await docRef.set({ messages }, { merge: true });
@@ -68,6 +79,7 @@ module.exports = {
     updateTask,
     getHistory,
     addHistory,
+    addHistoryBatch,
     getUserProfile,
     updateUserProfile
 };

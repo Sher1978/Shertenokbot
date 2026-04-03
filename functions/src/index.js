@@ -19,14 +19,9 @@ async function getBot() {
             
             botInstance = new Telegraf(token);
 
-            // Настраиваем команды
-            await botInstance.telegram.setMyCommands([
-                { command: 'start', description: 'Запустить бота' },
-                { command: 'projects', description: 'Список всех проектов' },
-                { command: 'tasks', description: 'Список активных задач' },
-                { command: 'status', description: 'Полный срез' },
-                { command: 'help', description: 'Как пользоваться ботом' }
-            ]);
+            // /wake — мгновенный ответ без AI, чтобы "разбудить" функцию
+            // После этого все секреты и соединения закэшируются
+            botInstance.command('wake', (ctx) => ctx.reply('⚡ Штирлиц здесь! Готов к работе. Можешь писать.'));
 
             botInstance.start((ctx) => ctx.reply('Привет! Твой системный компаньон Штирлиц. Я готов в облаке!'));
             

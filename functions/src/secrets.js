@@ -1,23 +1,30 @@
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
 const client = new SecretManagerServiceClient();
 
+// In-memory cache — секреты не меняются во время жизни инстанса
+const secretCache = new Map();
+
 /**
  * Надежно получает секрет из Google Secret Manager или переменных окружения.
- * @param {string} secretName Имя секрета (напр. 'TELEGRAM_BOT_TOKEN')
- * @returns {Promise<string>} Значение секрета
+ * Кэширует результат чтобы не ходить в Secret Manager повторно.
  */
 async function getSecret(secretName) {
+    if (secretCache.has(secretName)) {
+        return secretCache.get(secretName);
+    }
+
     // 1. Пробуем стандартное окружение
     if (process.env[secretName]) {
         const val = process.env[secretName];
-        console.log(`[Secrets] Found ${secretName} in environment. Starts with: ${val.substring(0, 10)}... (length: ${val.length})`);
+        secretCache.set(secretName, val);
+        console.log(`[Secrets] ${secretName} from env (length: ${val.length})`);
         return val;
     }
 
     // 2. Пробуем прямое обращение к Secret Manager
     try {
         const projectId = process.env.GCLOUD_PROJECT || 'sarafun-f9616';
-        console.log(`[Secrets] Fetching ${secretName} from Secret Manager (project: ${projectId})...`);
+        console.log(`[Secrets] Fetching ${secretName} from Secret Manager...`);
         
         const [version] = await client.accessSecretVersion({
             name: `projects/${projectId}/secrets/${secretName}/versions/latest`,
@@ -25,7 +32,8 @@ async function getSecret(secretName) {
         
         const value = version.payload.data.toString().trim();
         if (!value) throw new Error("Secret payload is empty");
-        
+
+        secretCache.set(secretName, value);
         return value;
     } catch (err) {
         console.error(`[Secrets] CRITICAL: Failed to get secret ${secretName}:`, err.message);
