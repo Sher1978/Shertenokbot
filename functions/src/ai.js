@@ -247,7 +247,7 @@ async function processMessage(userId, message, fileData = null) {
         const genAIInstance = await getAI();
         // Используем проверенный список моделей (gemini-pro первым, как в стабильном Sprint Bot)
         // Modern models like gemini-1.5-flash and gemini-1.5-pro are more reliable.
-        const availableModels = ["gemini-1.5-flash", "gemini-1.5-pro"];
+        const availableModels = ["gemini-2.0-flash", "gemini-2.5-flash"];
         let result = null;
         let lastError = null;
 
