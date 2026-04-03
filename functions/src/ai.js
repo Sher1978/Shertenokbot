@@ -240,7 +240,7 @@ async function processMessage(userId, message, fileData = null) {
     try {
         const ai = await getAI();
         const result = await ai.models.generateContent({
-            model: "gemini-1.5-flash",
+            model: "models/gemini-2.0-flash",
             contents,
             config: {
                 tools: tools,
@@ -395,7 +395,7 @@ async function processMessage(userId, message, fileData = null) {
             try {
                 const aiInstance = await getAI();
                 const response = await aiInstance.models.list();
-                const modelNames = response.models.map(m => m.name);
+                const modelNames = response.map(m => m.name);
                 console.error("[AI] Available models:", modelNames.join(", "));
             } catch (listErr) {
                 console.error("[AI] Failed to list models:", listErr.message);
