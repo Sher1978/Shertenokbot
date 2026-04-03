@@ -128,12 +128,8 @@ async function processMessage(userId, message) {
             contents
         });
 
-        // В новом SDK результат обычно находится в result.response
-        const response = result.response;
-        
-        // Обработка вызовов функций (function calls)
-        // В v1.x они могут быть в response.candidates[0].content.parts
-        const candidate = response.candidates?.[0];
+        // В новом унифицированном SDK результат вызова уже содержит кандидатов
+        const candidate = result.candidates?.[0];
         const parts = candidate?.content?.parts || [];
         
         let finalOutput = "";
