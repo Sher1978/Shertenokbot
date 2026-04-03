@@ -1,5 +1,4 @@
 const { google } = require('googleapis');
-const { GoogleAuth } = require('google-auth-library');
 const { getSecret } = require('./secrets');
 
 class GoogleService {
@@ -85,10 +84,27 @@ class GoogleService {
             throw e;
         }
 
-        // Use GoogleAuth instead of JWT to avoid OpenSSL 3 PKCS#1 incompatibility in Node.js 20
-        // JWT requires the legacy RSA format; GoogleAuth handles both PKCS#1 and PKCS#8 internally
-        this.auth = new GoogleAuth({
-            credentials: key,
+        // OpenSSL 3 fix for Node.js 20: pass a KeyObject instead of a raw PEM string.
+        // The old `jws` library (used inside google-auth-library) calls crypto.createSign(pem)
+        // which fails with ERR_OSSL_UNSUPPORTED on PKCS#8 keys in OpenSSL 3.
+        // Passing a pre-created KeyObject bypasses that legacy code path.
+        const { createPrivateKey } = require('crypto');
+        const { JWT } = require('google-auth-library');
+
+        let privateKeyObject;
+        try {
+            privateKeyObject = createPrivateKey(key.private_key);
+            console.log('[Google] Private key parsed as KeyObject successfully.');
+        } catch (keyErr) {
+            console.error('[Google] createPrivateKey failed:', keyErr.message);
+            // If key has wrong newlines, try fixing them
+            const fixedPem = key.private_key.replace(/\\n/g, '\n');
+            privateKeyObject = createPrivateKey(fixedPem);
+        }
+
+        this.auth = new JWT({
+            email: key.client_email,
+            key: privateKeyObject,
             scopes: [
                 'https://www.googleapis.com/auth/drive',
                 'https://www.googleapis.com/auth/calendar'
@@ -97,7 +113,8 @@ class GoogleService {
 
         this.drive = google.drive({ version: 'v3', auth: this.auth });
         this.calendar = google.calendar({ version: 'v3', auth: this.auth });
-        console.log(`[Google] Service authorized successfully as: ${key.client_email}`);
+        console.log(`[Google] Service authorized as: ${key.client_email}`);
+
     }
 
     async createProjectFolder(projectName) {
