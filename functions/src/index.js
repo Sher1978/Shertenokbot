@@ -55,29 +55,76 @@ async function getBot() {
             
             botInstance = new Telegraf(token);
 
-            // Helper for situational photos
+            // Системный маппинг групп изображений (расширенная библиотека)
+            const IMAGE_GROUPS = {
+                'intel': [
+                    'thinking.png', 'investigation.png',
+                    'lib/intel/intel_0.jpg', 'lib/intel/intel_1.jpg', 'lib/intel/intel_2.jpg', 'lib/intel/intel_3.jpg',
+                    'lib/intel/intel_4.jpg', 'lib/intel/intel_5.jpg', 'lib/intel/intel_6.png', 'lib/intel/intel_7.jpg'
+                ],
+                'relax': [
+                    'welcome.png', 'waiting.png',
+                    'lib/relax/relax_0.jpg', 'lib/relax/relax_1.webp', 'lib/relax/relax_2.jpg', 'lib/relax/relax_3.jpg',
+                    'lib/relax/relax_4.jpg', 'lib/relax/relax_5.jpg', 'lib/relax/relax_6.jpg', 'lib/relax/relax_7.webp'
+                ],
+                'oper': [
+                    'briefing.png', 'surveillance.png', 'transit.png',
+                    'lib/oper/oper_0.jpg', 'lib/oper/oper_1.jpg', 'lib/oper/oper_2.jpeg', 'lib/oper/oper_3.jpg',
+                    'lib/oper/oper_4.jpg', 'lib/oper/oper_5.webp', 'lib/oper/oper_6.jpg', 'lib/oper/oper_7.webp'
+                ],
+                'crisis': [
+                    'bad_news.png', 'crisis.png', 'important.png',
+                    'lib/crisis/crisis_0.jpg', 'lib/crisis/crisis_1.jpg', 'lib/crisis/crisis_2.jpg', 'lib/crisis/crisis_3.jpg',
+                    'lib/crisis/crisis_4.jpg', 'lib/crisis/crisis_5.jpg', 'lib/crisis/crisis_6.jpg', 'lib/crisis/crisis_7.jpg'
+                ],
+                'arch': [
+                    'authority.png', 'searching.png',
+                    'lib/arch/arch_0.webp', 'lib/arch/arch_1.jpg', 'lib/arch/arch_2.jpg', 'lib/arch/arch_3.jpg',
+                    'lib/arch/arch_4.jpg', 'lib/arch/arch_5.jpg', 'lib/arch/arch_6.jpg'
+                ]
+            };
+
+            // Маппинг старых тегов к новым группам (для обратной совместимости)
+            const OLD_TAGS_MAP = {
+                'welcome': 'relax', 'thinking': 'intel', 'searching': 'arch',
+                'briefing': 'oper', 'investigation': 'intel', 'authority': 'arch',
+                'crisis': 'crisis', 'important': 'crisis', 'surveillance': 'oper',
+                'transit': 'oper', 'waiting': 'relax', 'bad_news': 'crisis'
+            };
+
+            // Helper for situational photos (updated with random library select)
             const sendPhotoIfNeeded = async (ctx, response) => {
                 const userId = ctx.from.id.toString();
                 const match = response.match(/\[IMAGE:\s*(\w+)\]/);
                 
                 if (match) {
-                    const key = match[1];
-                    const photoPath = path.join(__dirname, 'assets', `${key}.png`);
+                    let key = match[1].toLowerCase();
+                    
+                    // Если тег старый, переводим его в категорию
+                    if (OLD_TAGS_MAP[key]) key = OLD_TAGS_MAP[key];
 
-                    // Проверка кулдауна на картинку (15 минут)
-                    const canSend = await checkImageCooldown(userId, key);
+                    const group = IMAGE_GROUPS[key];
+                    if (group && group.length > 0) {
+                        // Выбираем случайное изображение из группы
+                        const randomImage = group[Math.floor(Math.random() * group.length)];
+                        const photoPath = path.join(__dirname, 'assets', randomImage);
 
-                    if (canSend && fs.existsSync(photoPath)) {
-                        try {
-                            await ctx.replyWithPhoto({ source: photoPath });
-                        } catch (e) {
-                            console.error(`Failed to send photo: ${key}`, e);
+                        // Проверка кулдауна на категорию (15 минут)
+                        const canSend = await checkImageCooldown(userId, key);
+
+                        if (canSend && fs.existsSync(photoPath)) {
+                            try {
+                                await ctx.replyWithPhoto({ source: photoPath });
+                                console.log(`[Bot] Sent random image ${randomImage} from category ${key}`);
+                            } catch (e) {
+                                console.error(`Failed to send photo: ${randomImage}`, e);
+                            }
+                        } else if (!canSend) {
+                            console.log(`[Bot] Category ${key} is on cooldown for user ${userId}. Skipping binary send.`);
                         }
-                    } else if (!canSend) {
-                        console.log(`[Bot] Image ${key} is on cooldown for user ${userId}. Skipping binary send.`);
                     }
                     
-                    // В любом случае убираем тег из текста
+                    // Убираем тег из текста
                     return response.replace(/\[IMAGE:\s*\w+\]/g, '').trim();
                 }
                 return response;
@@ -402,7 +449,7 @@ exports.bot = onRequest({
     region: "us-central1",
     memory: "256MiB",
     maxInstances: 10,
-    secrets: ["GEMINI_API_KEY", "TELEGRAM_BOT_TOKEN"]
+    secrets: ["GEMINI_API_KEY", "TELEGRAM_BOT_TOKEN", "GOOGLE_SERVICE_ACCOUNT_JSON"]
 }, async (req, res) => {
     try {
         const bot = await getBot();

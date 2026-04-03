@@ -1,5 +1,5 @@
+let client = null;
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
-const client = new SecretManagerServiceClient();
 
 // In-memory cache — секреты не меняются во время жизни инстанса
 const secretCache = new Map();
@@ -9,6 +9,10 @@ const secretCache = new Map();
  * Кэширует результат чтобы не ходить в Secret Manager повторно.
  */
 async function getSecret(secretName) {
+    if (!client) {
+        client = new SecretManagerServiceClient();
+    }
+
     if (secretCache.has(secretName)) {
         return secretCache.get(secretName);
     }

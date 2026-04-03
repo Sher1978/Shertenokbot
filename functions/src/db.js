@@ -1,14 +1,22 @@
-const { initializeApp } = require('firebase-admin/app');
+const { getApp, getApps, initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 
-// В среде Firebase Cloud Functions приложение инициализируется автоматически без ключей
-initializeApp();
-const db = getFirestore();
+let dbInstance = null;
+
+function getFirestoreDb() {
+    if (!dbInstance) {
+        if (getApps().length === 0) {
+            initializeApp();
+        }
+        dbInstance = getFirestore();
+    }
+    return dbInstance;
+}
 
 async function getDb() {
     // В Firestore мы не читаем всю базу сразу, но для совместимости с прошлым кодом:
-    const projectsSnap = await db.collection('projects').get();
-    const tasksSnap = await db.collection('tasks').get();
+    const projectsSnap = await getFirestoreDb().collection('projects').get();
+    const tasksSnap = await getFirestoreDb().collection('tasks').get();
     
     return {
         projects: projectsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })),
@@ -18,28 +26,28 @@ async function getDb() {
 
 // Заменяем saveDb на точечные обновления Firestore для эффективности
 async function addTask(task) {
-    const res = await db.collection('tasks').add(task);
+    const res = await getFirestoreDb().collection('tasks').add(task);
     return res.id;
 }
 
 async function addProject(project) {
-    const res = await db.collection('projects').doc(project.name).set(project, { merge: true });
+    const res = await getFirestoreDb().collection('projects').doc(project.name).set(project, { merge: true });
     return project.name;
 }
 
 async function updateTask(taskId, updates) {
-    await db.collection('tasks').doc(taskId).update(updates);
+    await getFirestoreDb().collection('tasks').doc(taskId).update(updates);
 }
 
 // История сообщений (контекст AI)
 async function getHistory(userId) {
-    const snap = await db.collection('history').doc(userId).get();
+    const snap = await getFirestoreDb().collection('history').doc(userId).get();
     if (!snap.exists) return [];
     return snap.data().messages || [];
 }
 
 async function addHistory(userId, role, text) {
-    const docRef = db.collection('history').doc(userId);
+    const docRef = getFirestoreDb().collection('history').doc(userId);
     const snap = await docRef.get();
     let messages = snap.exists ? (snap.data().messages || []) : [];
     
@@ -51,7 +59,7 @@ async function addHistory(userId, role, text) {
 
 // Записывает сразу несколько сообщений за одну пару read/write
 async function addHistoryBatch(userId, newMessages) {
-    const docRef = db.collection('history').doc(userId);
+    const docRef = getFirestoreDb().collection('history').doc(userId);
     const snap = await docRef.get();
     let messages = snap.exists ? (snap.data().messages || []) : [];
     
@@ -63,21 +71,21 @@ async function addHistoryBatch(userId, newMessages) {
 
 // Профиль пользователя (долгосрочная память)
 async function getUserProfile(userId) {
-    const snap = await db.collection('user_profile').doc(userId).get();
+    const snap = await getFirestoreDb().collection('user_profile').doc(userId).get();
     if (!snap.exists) return {};
     return snap.data() || {};
 }
 
 async function updateUserProfile(userId, updates) {
-    await db.collection('user_profile').doc(userId).set(updates, { merge: true });
+    await getFirestoreDb().collection('user_profile').doc(userId).set(updates, { merge: true });
 }
 
 async function checkImageCooldown(userId, imageKey) {
-    const docRef = db.collection('user_profile').doc(userId);
+    const docRef = getFirestoreDb().collection('user_profile').doc(userId);
     const now = Date.now();
     const cooldownMs = 15 * 60 * 1000;
     
-    return await db.runTransaction(async (transaction) => {
+    return await getFirestoreDb().runTransaction(async (transaction) => {
         const snap = await transaction.get(docRef);
         const data = snap.exists ? snap.data() : {};
         const cooldowns = data.imageCooldowns || {};
@@ -104,10 +112,10 @@ async function trackUsage(userId, isGuest) {
     const dateStr = now.toISOString().split('T')[0]; // ГГГГ-ММ-ДД
     const minTimestamp = Math.floor(now.getTime() / 60000); // Текущая минута
 
-    const globalRef = db.collection('usage').doc('global_' + dateStr);
-    const userRef = db.collection('usage').doc(userId + '_' + dateStr);
+    const globalRef = getFirestoreDb().collection('usage').doc('global_' + dateStr);
+    const userRef = getFirestoreDb().collection('usage').doc(userId + '_' + dateStr);
 
-    return await db.runTransaction(async (transaction) => {
+    return await getFirestoreDb().runTransaction(async (transaction) => {
         const globalSnap = await transaction.get(globalRef);
         const userSnap = await transaction.get(userRef);
 
@@ -155,12 +163,12 @@ async function trackUsage(userId, isGuest) {
  * @returns {Promise<{admin: number, totalGuests: number, estimatedCost: string}>}
  */
 async function getDailyStats(dateStr) {
-    const globalRef = db.collection('usage').doc('global_' + dateStr);
+    const globalRef = getFirestoreDb().collection('usage').doc('global_' + dateStr);
     const globalSnap = await globalRef.get();
     const adminCount = globalSnap.exists ? (globalSnap.data().count || 0) : 0;
     
     // Считаем всех гостей (все документы, которые заканчиваются на _dateStr, но не global_)
-    const usageSnap = await db.collection('usage').get();
+    const usageSnap = await getFirestoreDb().collection('usage').get();
     let guestCount = 0;
     
     usageSnap.forEach(doc => {

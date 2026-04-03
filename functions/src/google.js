@@ -1,4 +1,4 @@
-const { google } = require('googleapis');
+const { createPrivateKey } = require('crypto');
 const { getSecret } = require('./secrets');
 
 class GoogleService {
@@ -43,6 +43,9 @@ class GoogleService {
 
     async init() {
         if (this.auth) return;
+
+        const { google } = require('googleapis');
+        const { JWT } = require('google-auth-library');
 
         let rawJson = await getSecret('GOOGLE_SERVICE_ACCOUNT_JSON');
 
@@ -121,26 +124,21 @@ class GoogleService {
         // The underlying 'jws' library (used by google-auth-library) can fail with 
         // ERR_OSSL_UNSUPPORTED when given raw PEM strings for certain old-format keys.
         // We MUST ensure the PEM is in a strictly valid format with proper newlines.
-        const { createPrivateKey } = require('crypto');
-        const { JWT } = require('google-auth-library');
-
-        const normalizedPem = this.normalizePem(key.private_key);
-        let authKey;
-
+        // We MUST ensure the PEM is in a strictly valid format with proper newlines.
+        
+        // Validation check for Node 20 / OpenSSL 3 connectivity
         try {
-            // First attempt: use the normalized PEM string with createPrivateKey
-            // This is the most reliable way in Node 20 to avoid OpenSSL decoder issues.
-            authKey = createPrivateKey(normalizedPem);
-            console.log('[Google] Private key successfully decoded into KeyObject.');
+            const tempKey = createPrivateKey(normalizedPem);
+            console.log('[Google] Private key validation successful (decoded via crypto.createPrivateKey).');
         } catch (keyErr) {
-            console.error('[Google] createPrivateKey failed despite normalization:', keyErr.message);
-            // Fallback: pass the string directly and hope the higher-level lib handles it.
-            authKey = normalizedPem;
+            console.warn('[Google] Private key validation warning:', keyErr.message);
         }
 
+        // We pass the string directly because 'gtoken' (internal lib) 
+        // handles strings better than KeyObjects in some Node/OpenSSL environments.
         this.auth = new JWT({
             email: key.client_email,
-            key: authKey,
+            key: normalizedPem,
             scopes: [
                 'https://www.googleapis.com/auth/drive',
                 'https://www.googleapis.com/auth/calendar'
