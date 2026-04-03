@@ -52,6 +52,34 @@ async function getBot() {
             
             botInstance = new Telegraf(token);
 
+            // Helper for situational photos
+            const sendPhotoIfNeeded = async (ctx, response) => {
+                const match = response.match(/\[IMAGE:\s*(\w+)\]/);
+                if (match) {
+                    const key = match[1];
+                    const photoPath = path.join(__dirname, 'assets', `${key}.png`);
+                    if (fs.existsSync(photoPath)) {
+                        try {
+                            await ctx.replyWithPhoto({ source: photoPath });
+                        } catch (e) {
+                            console.error(`Failed to send photo: ${key}`, e);
+                        }
+                    }
+                    return response.replace(/\[IMAGE:\s*\w+\]/g, '').trim();
+                }
+                return response;
+            };
+
+            const getMskTime = () => new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
+
+            try {
+                // Set bot persona metadata
+                await botInstance.telegram.setMyDescription("Штирлиц — ваш оперативный помощник. Разведка, планирование, отчетность. Связь с Центром установлена.");
+                await botInstance.telegram.setMyShortDescription("Оперативный помощник Штирлиц. Разведка и планирование.");
+            } catch (e) {
+                console.error("Failed to set bot info:", e);
+            }
+
             // Регистрируем меню команд без await — fire-and-forget, не блокирует cold start
             botInstance.telegram.setMyCommands([
                 { command: 'wake',     description: '⚡ Разбудить Штирлица' },
@@ -81,7 +109,7 @@ async function getBot() {
                 if (warning) {
                     await ctx.reply("🧥 Штирлиц, Центр сообщает: лимит бесплатных шифровок на исходе (использовано 1300 из 1500). Пора экономить.");
                 }
-                const response = await ai.processMessage(ctx.from.id.toString(), "Покажи мои проекты.");
+                const response = await ai.processMessage(ctx.from.id.toString(), "Покажи мои проекты.", null, getMskTime());
                 await ctx.reply(response);
             });
 
@@ -90,7 +118,7 @@ async function getBot() {
                 if (warning) {
                     await ctx.reply("🧥 Штирлиц, Центр сообщает: лимит бесплатных шифровок на исходе (использовано 1300 из 1500). Пора экономить.");
                 }
-                const response = await ai.processMessage(ctx.from.id.toString(), "Покажи мои активные задачи.");
+                const response = await ai.processMessage(ctx.from.id.toString(), "Покажи мои активные задачи.", null, getMskTime());
                 await ctx.reply(response);
             });
 
@@ -99,7 +127,7 @@ async function getBot() {
                 if (warning) {
                     await ctx.reply("🧥 Штирлиц, Центр сообщает: лимит бесплатных шифровок на исходе (использовано 1300 из 1500). Пора экономить.");
                 }
-                const response = await ai.processMessage(ctx.from.id.toString(), "Сделай полный аудит по всем моим проектам и задачам.");
+                const response = await ai.processMessage(ctx.from.id.toString(), "Сделай полный аудит по всем моим проектам и задачам.", null, getMskTime());
                 await ctx.reply(response);
             });
 
@@ -120,7 +148,8 @@ async function getBot() {
                     await ctx.reply("🧥 Штирлиц, Центр сообщает: лимит бесплатных шифровок на исходе (использовано 1300 из 1500). Пора экономить.");
                 }
                 try {
-                    const response = await ai.processMessage(ctx.from.id.toString(), ctx.message.text);
+                    let response = await ai.processMessage(ctx.from.id.toString(), ctx.message.text, null, getMskTime());
+                    response = await sendPhotoIfNeeded(ctx, response);
                     await ctx.reply(response);
                 } catch (e) {
                     console.error("AI processing error:", e);
@@ -155,11 +184,13 @@ async function getBot() {
                     const mimeType = ctx.message.document.mime_type;
                     const base64 = await downloadFile(fileId);
                     
-                    const response = await ai.processMessage(
+                    let response = await ai.processMessage(
                         ctx.from.id.toString(), 
                         ctx.message.caption || "Проанализируй этот документ.",
-                        { mimeType, data: base64 }
+                        { mimeType, data: base64 },
+                        getMskTime()
                     );
+                    response = await sendPhotoIfNeeded(ctx, response);
                     await ctx.reply(response);
                 } catch (e) {
                     console.error("Document processing error:", e);
@@ -188,11 +219,13 @@ async function getBot() {
                     const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
                     const base64 = await downloadFile(fileId);
                     
-                    const response = await ai.processMessage(
+                    let response = await ai.processMessage(
                         ctx.from.id.toString(), 
                         ctx.message.caption || "Что на этом фото?",
-                        { mimeType: 'image/jpeg', data: base64 }
+                        { mimeType: 'image/jpeg', data: base64 },
+                        getMskTime()
                     );
+                    response = await sendPhotoIfNeeded(ctx, response);
                     await ctx.reply(response);
                 } catch (e) {
                     console.error("Photo processing error:", e);
