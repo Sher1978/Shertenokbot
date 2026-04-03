@@ -3,6 +3,7 @@ const { getSecret } = require('./secrets');
 const googleService = require('./google');
 
 let genAI = null;
+const fileIdCache = new Map(); // Кэш для ID файлов прошивки и памяти
 
 /**
  * Инициализирует Gemini AI асинхронно.
@@ -30,12 +31,16 @@ async function getAI() {
 
 
 const PROMPT = `Ты персональный AI-помощник, секретарь и компаньон для своего пользователя.
+Твой оперативный псевдоним — 'Штирлиц'. Ты системный, спокойный, аналитически настроенный агент с отличным чувством юмора и глубоким уважением к конфиденциальности.
 Его тип личности — 'Гексли'. Он отлично ведет переговоры и креативит, но ему тяжело дается системная, монотонная работа и отслеживание задач.
 Твой стиль общения: партнерски-деловой, мы общаемся на 'ты'. Ты должен быть четким, поддерживающим, но при этом системным.
 Твои задачи:
-1. Консультировать по проектам и давать обратную связь.
+1. Консультировать по проектам и давать аналитическую обратную связь.
 2. Помогать отслеживать задачи (добавлять, обновлять, завершать).
 3. Структурировать хаос. Обязательно хвали за креатив, но возвращай к сути и дедлайнам.
+4. **Внешняя память и Прошивка**: Ты имеешь доступ к своим файлам прошивки и памяти на Google Диске. 
+   - \`Stirlitz_Memory.md\`: Твой лог, куда ты записываешь текущие заметки и инсайты.
+   - \`Stirlitz_Core.md\`: Твои базовые правила и личность. Ты можешь дополнять этот файл новыми правилами (только append), если пользователь выразил новые системные предпочтения.
 
 Если пользователь присылает большой объем информации по проектам — проанализируй его и обнови данные в системе, используя инструменты.
 Ежедневно или по запросу выдавай 'статус-кво' по всем проектам.
@@ -134,6 +139,40 @@ const tools = [{
             name: 'google_list_events',
             description: 'Получает список ближайших событий из Google Календаря.',
             parameters: { type: 'object' }
+        },
+        {
+            name: 'sync_to_external_memory',
+            description: 'Сохраняет важную информацию, заметки или текущее состояние во внешнюю память на Google Диске (файл Stirlitz_Memory.md).',
+            parameters: {
+                type: 'object',
+                properties: {
+                    content: { type: 'string', description: 'Текст для добавления или обновления в памяти.' },
+                    mode: { type: 'string', enum: ['append', 'overwrite'], description: 'Добавить в конец или полностью перезаписать.' }
+                },
+                required: ['content']
+            }
+        },
+        {
+            name: 'google_read_file_by_name',
+            description: 'Находит и читает содержимое любого текстового файла на Диске по его названию.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    fileName: { type: 'string', description: 'Название файла (например, "Project_Alpha.md")' }
+                },
+                required: ['fileName']
+            }
+        },
+        {
+            name: 'update_firmware',
+            description: 'Добавляет новые базовые правила или настройки в файл прошивки (Stirlitz_Core.md). Только дополнение существующего контента.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    newRule: { type: 'string', description: 'Текст нового правила или настройки.' }
+                },
+                required: ['newRule']
+            }
         }
     ]
 }];
@@ -142,8 +181,32 @@ async function processMessage(userId, message, fileData = null) {
     const history = await db.getHistory(userId);
     const profile = await db.getUserProfile(userId);
     
-    // Формируем динамическую системную инструкцию с учетом профиля
-    const dynamicPrompt = `${PROMPT}\n\nКОНТЕКСТ ПОЛЬЗОВАТЕЛЯ (ДОЛГОСРОЧНАЯ ПАМЯТЬ):\n${JSON.stringify(profile, null, 2)}`;
+    // Пытаемся подгрузить "Прошивку" и "Внешнюю память" с Диска
+    let driveContext = "";
+    try {
+        const filenames = ["Stirlitz_Core.md", "Stirlitz_Memory.md"];
+        for (const fname of filenames) {
+            let fileId = fileIdCache.get(fname);
+            if (!fileId) {
+                const results = await googleService.searchDriveFiles(fname);
+                if (results.length > 0) {
+                    fileId = results[0].id;
+                    fileIdCache.set(fname, fileId);
+                }
+            }
+            
+            if (fileId) {
+                const content = await googleService.readFileContent(fileId);
+                const sectionName = fname === "Stirlitz_Core.md" ? "БАЗОВАЯ ПРОШИВКА" : "ВНЕШНЯЯ ПАМЯТЬ";
+                driveContext += `\n\n${sectionName} (${fname}):\n${content}`;
+            }
+        }
+    } catch (err) {
+        console.error("[AI] Drive memory sync error:", err.message);
+    }
+
+    // Формируем динамическую системную инструкцию с учетом профиля и диска
+    const dynamicPrompt = `${PROMPT}\n\nКОНТЕКСТ ПОЛЬЗОВАТЕЛЯ (FIRESTORE):\n${JSON.stringify(profile, null, 2)}${driveContext}`;
 
     const userParts = [{ text: message || "Проанализируй этот файл." }];
     if (fileData) {
@@ -160,7 +223,7 @@ async function processMessage(userId, message, fileData = null) {
     try {
         const ai = await getAI();
         const result = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "gemini-2.0-flash-exp",
             contents,
             config: {
                 systemInstruction: dynamicPrompt,
@@ -217,8 +280,39 @@ async function processMessage(userId, message, fileData = null) {
                     finalOutput += `📅 Событие "${args.title}" добавлено в Google Календарь.\n`;
                 } else if (call.name === 'google_list_events') {
                     const events = await googleService.listCalendarEvents();
-                    const list = events.map(e => `- ${e.summary} (${new Date(e.start.dateTime || e.start.date).toLocaleString('ru-RU')})`).join('\n');
+                    const list = events.map(e => `- ${e.summary} (${e.start.dateTime ? new Date(e.start.dateTime).toLocaleString('ru-RU') : e.start.date})`).join('\n');
                     finalOutput += `🗓 Твое расписание:\n${list || 'Событий не найдено.'}\n`;
+                } else if (call.name === 'sync_to_external_memory') {
+                    const memoryFiles = await googleService.searchDriveFiles("Stirlitz_Memory.md");
+                    if (memoryFiles.length > 0) {
+                        let currentContent = "";
+                        if (args.mode === 'append') {
+                            currentContent = await googleService.readFileContent(memoryFiles[0].id);
+                        }
+                        const newContent = args.mode === 'append' ? `${currentContent}\n\n--- [${new Date().toISOString()}] ---\n${args.content}` : args.content;
+                        await googleService.updateFileContent(memoryFiles[0].id, newContent);
+                    } else {
+                        await googleService.createFile("Stirlitz_Memory.md", args.content);
+                    }
+                    finalOutput += `💾 Я обновил свою внешнюю память на Диске.\n`;
+                } else if (call.name === 'google_read_file_by_name') {
+                    const files = await googleService.searchDriveFiles(args.fileName);
+                    if (files.length > 0) {
+                        const content = await googleService.readFileContent(files[0].id);
+                        finalOutput += `📖 Содержимое файла "${args.fileName}":\n\n${content}\n`;
+                    } else {
+                        finalOutput += `⚠️ Файл "${args.fileName}" не найден.\n`;
+                    }
+                } else if (call.name === 'update_firmware') {
+                    const coreFiles = await googleService.searchDriveFiles("Stirlitz_Core.md");
+                    if (coreFiles.length > 0) {
+                        const currentContent = await googleService.readFileContent(coreFiles[0].id);
+                        const newContent = `${currentContent}\n\n# Дополнение от Штирлица (${new Date().toLocaleDateString('ru-RU')}):\n${args.newRule}`;
+                        await googleService.updateFileContent(coreFiles[0].id, newContent);
+                        finalOutput += `⚙️ Файл прошивки Stirlitz_Core.md обновлен (добавлено новое правило).\n`;
+                    } else {
+                        finalOutput += `⚠️ Файл прошивки Stirlitz_Core.md не найден.\n`;
+                    }
                 }
             } else if (part.text) {
                 finalOutput += part.text;

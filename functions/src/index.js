@@ -28,7 +28,7 @@ async function getBot() {
                 { command: 'help', description: 'Как пользоваться ботом' }
             ]);
 
-            botInstance.start((ctx) => ctx.reply('Привет! Твой системный компаньон Гексли. Я готов в облаке!'));
+            botInstance.start((ctx) => ctx.reply('Привет! Твой системный компаньон Штирлиц. Я готов в облаке!'));
             
             botInstance.command('projects', async (ctx) => {
                 const response = await ai.processMessage(ctx.from.id.toString(), "Покажи мои проекты.");

@@ -61,7 +61,7 @@ class GoogleService {
 
             const event = {
                 'summary': title,
-                'description': 'Создано ассистентом Гексли',
+                'description': 'Создано ассистентом Штирлиц',
                 'start': { 'dateTime': start.toISOString(), 'timeZone': 'UTC' },
                 'end': { 'dateTime': end.toISOString(), 'timeZone': 'UTC' },
                 'reminders': { 'useDefault': true },
@@ -107,6 +107,74 @@ class GoogleService {
             return response.data.files || [];
         } catch (err) {
             console.error('Error searching drive files:', err);
+            throw err;
+        }
+    }
+
+    async readFileContent(fileId) {
+        await this.init();
+        try {
+            // Сначала проверяем mimeType
+            const metadata = await this.drive.files.get({ fileId, fields: 'mimeType, name' });
+            const mimeType = metadata.data.mimeType;
+
+            if (mimeType === 'application/vnd.google-apps.document') {
+                const response = await this.drive.files.export({
+                    fileId,
+                    mimeType: 'text/plain'
+                });
+                return response.data;
+            } else {
+                const response = await this.drive.files.get({
+                    fileId,
+                    alt: 'media'
+                });
+                return typeof response.data === 'object' ? JSON.stringify(response.data) : response.data;
+            }
+        } catch (err) {
+            console.error('Error reading drive file content:', err);
+            throw err;
+        }
+    }
+
+    async updateFileContent(fileId, content) {
+        await this.init();
+        try {
+            const response = await this.drive.files.update({
+                fileId,
+                media: {
+                    mimeType: 'text/plain',
+                    body: content
+                }
+            });
+            return response.data;
+        } catch (err) {
+            console.error('Error updating drive file content:', err);
+            throw err;
+        }
+    }
+
+    async createFile(name, content, parentId = null) {
+        await this.init();
+        try {
+            const fileMetadata = {
+                'name': name,
+                'mimeType': 'text/markdown'
+            };
+            if (parentId) {
+                fileMetadata.parents = [parentId];
+            }
+            const response = await this.drive.files.create({
+                resource: fileMetadata,
+                media: {
+                    mimeType: 'text/markdown',
+                    body: content
+                },
+                fields: 'id, name'
+            });
+            return response.data;
+        } catch (err) {
+            console.error('Error creating drive file:', err);
             throw err;
         }
     }
