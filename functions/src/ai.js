@@ -240,7 +240,7 @@ async function processMessage(userId, message, fileData = null) {
     try {
         const ai = await getAI();
         const result = await ai.models.generateContent({
-            model: "models/gemini-2.0-flash",
+            model: "models/gemini-1.5-flash",
             contents,
             config: {
                 tools: tools,

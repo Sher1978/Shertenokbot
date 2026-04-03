@@ -15,22 +15,20 @@ class GoogleService {
 
         let key;
         try {
-            // First attempt: direct parse
+            // 1. Direct parse
             key = JSON.parse(rawJson);
         } catch (e) {
+            console.warn("[Google] Standard JSON parse failed, trying fallbacks...");
             try {
-                // Second attempt: remove literal newlines and control characters that often break JSON parsing
-                const cleaned = rawJson
-                    .replace(/[\x00-\x1F\x7F-\x9F]/g, "") // remove all control characters
-                    .trim();
+                // 2. Handle unescaped newlines inside string literals (common paste error)
+                // We'll replace real newlines with escaped ones.
+                const cleaned = rawJson.replace(/\r?\n/g, "\\n");
                 key = JSON.parse(cleaned);
             } catch (e2) {
-                console.warn("[Google] Standard JSON parse failed, trying multi-line fallback...");
                 try {
-                    // Third attempt: if it's a multiline string pasted with actual breaks
-                    const formatted = rawJson.trim().replace(/\n/g, "\\n");
-                    // We need to wrap it back if it lost the structure
-                    key = JSON.parse(formatted);
+                    // 3. Remove all control characters and trim
+                    const stripped = rawJson.replace(/[\x00-\x1F\x7F-\x9F]/g, "").trim();
+                    key = JSON.parse(stripped);
                 } catch (e3) {
                     console.error("[Google] CRITICAL: Could not parse Service Account Secret.");
                     throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON format error.");
