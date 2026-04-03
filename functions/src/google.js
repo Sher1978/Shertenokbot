@@ -15,33 +15,28 @@ class GoogleService {
 
         let key;
         try {
-            // 1. Direct parse (ideal case)
-            key = JSON.parse(rawJson);
-        } catch (e) {
-            console.warn("[Google] Standard JSON parse failed, trying fallbacks...");
+            // 1. First, try to extract the JSON object with a regex to ignore any wrapping text/backticks
+            const match = rawJson.match(/\{[\s\S]*\}/);
+            if (!match) throw new Error("No curly braces found in secret string.");
+            
+            let jsonString = match[0];
+            
+            // 2. Try simple parse on the extracted part
             try {
-                // 2. Remove any "JSON" or code block wrappers if copied from a chat
-                let cleaned = rawJson.replace(/```json|```/g, "").trim();
-                // 3. Handle unescaped newlines and replace literal \n with real newlines for the private_key
-                cleaned = cleaned.replace(/\r?\n/g, ""); // Remove real newlines first to flatten
+                key = JSON.parse(jsonString);
+            } catch (innerErr) {
+                // 3. Fallback: handle common unescaped newline issues in the private_key specifically
+                // This is risky but often fixes manually pasted PKCS8 keys.
+                console.warn("[Google] Inner parse failed, trying character cleanup...");
+                // Keep only printable ASCII and common white space
+                const cleaned = jsonString.replace(/[^\x20-\x7E\r\n\t]/g, "");
                 key = JSON.parse(cleaned);
-            } catch (e2) {
-                try {
-                    // 4. Most aggressive: keep only printable characters and try to extract the JSON part
-                    const start = rawJson.indexOf('{');
-                    const end = rawJson.lastIndexOf('}');
-                    if (start !== -1 && end !== -1) {
-                        const extracted = rawJson.substring(start, end + 1);
-                        key = JSON.parse(extracted);
-                    } else {
-                        throw new Error("No JSON object markers found.");
-                    }
-                } catch (e3) {
-                    console.error("[Google] CRITICAL: Could not parse Service Account Secret.");
-                    console.error("[Google] Raw length:", rawJson ? rawJson.length : 0);
-                    throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON format error.");
-                }
             }
+        } catch (e) {
+            console.error("[Google] CRITICAL: Service Account Secret parsing failed.");
+            console.error("[Google] Hint: Ensure GOOGLE_SERVICE_ACCOUNT_JSON in Secret Manager is valid JSON.");
+            console.error("[Google] Raw length:", rawJson ? rawJson.length : 0);
+            throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON format error.");
         }
 
         this.auth = new google.auth.JWT(

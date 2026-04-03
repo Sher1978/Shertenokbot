@@ -14,7 +14,7 @@
   "main": "src/index.js",
   "dependencies": {
     "@google-cloud/secret-manager": "^5.6.0",
-    "@google/genai": "^1.48.0",
+    "@google/generative-ai": "^0.22.0",
     "axios": "^1.14.0",
     "dotenv": "^17.4.0",
     "firebase-admin": "^13.7.0",

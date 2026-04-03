@@ -9,7 +9,7 @@ const fileIdCache = new Map(); // Кэш для ID файлов (в памяти
 /**
  * Инициализирует Gemini AI асинхронно.
  */
-const { GoogleGenerativeAI } = require('@google/genai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 let aiClient = null;
 
