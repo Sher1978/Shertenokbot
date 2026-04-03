@@ -45,4 +45,32 @@ async function getSecret(secretName) {
     }
 }
 
-module.exports = { getSecret };
+/**
+ * Robustly parses a JSON secret, with regex fallback for malformed JSON
+ * (e.g. unescaped newlines in private key).
+ */
+function parseJsonSecret(secretContent) {
+    if (!secretContent) return null;
+    
+    try {
+        return JSON.parse(secretContent);
+    } catch (err) {
+        console.warn(`[Secrets] JSON.parse failed (pos: ${err.message}). Attempting regex recovery...`);
+        
+        // Fallback: extract key fields using regex if JSON is malformed
+        const emailMatch = secretContent.match(/"client_email"\s*:\s*"([^"]+)"/);
+        const keyMatch = secretContent.match(/"private_key"\s*:\s*"([\s\S]+?)"/);
+        
+        if (emailMatch && keyMatch) {
+            console.log(`[Secrets] Success via Regex Extraction: ${emailMatch[1]}`);
+            return {
+                client_email: emailMatch[1],
+                private_key: keyMatch[1]
+            };
+        }
+        
+        throw new Error(`[Secrets] Failed to parse JSON secret and recovery failed: ${err.message}`);
+    }
+}
+
+module.exports = { getSecret, parseJsonSecret };

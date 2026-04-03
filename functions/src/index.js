@@ -2,7 +2,7 @@ const { onRequest } = require('firebase-functions/v2/https');
 const { Telegraf } = require('telegraf');
 const ai = require('./ai');
 const { OWNER_ID } = require('./ai');
-const { getSecret } = require('./secrets');
+const { getSecret, parseJsonSecret } = require('./secrets');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
@@ -212,8 +212,10 @@ async function getBot() {
 
                     // Отправляем email сервисного аккаунта для настройки календаря (только при первом старте или по запросу)
                     if (!profile.googleCalendarId || welcomeMsg.includes("сервисным адресом")) {
-                        const serviceAccount = JSON.parse(await getSecret('GOOGLE_SERVICE_ACCOUNT_JSON'));
-                        await ctx.reply(`📫 Адрес для доступа к календарю:\n\`${serviceAccount.client_email}\`\n\nПросто добавьте его в настройки доступа вашего Google Календаря.`, { parse_mode: 'Markdown' });
+                        const serviceAccount = parseJsonSecret(await getSecret('GOOGLE_SERVICE_ACCOUNT_JSON'));
+                        if (serviceAccount && serviceAccount.client_email) {
+                            await ctx.reply(`📫 Адрес для доступа к календарю:\n\`${serviceAccount.client_email}\`\n\nПросто добавьте его в настройки доступа вашего Google Календаря.`, { parse_mode: 'Markdown' });
+                        }
                     }
 
                 } catch (err) {

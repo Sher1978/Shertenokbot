@@ -1,5 +1,5 @@
 const { createPrivateKey } = require('crypto');
-const { getSecret } = require('./secrets');
+const { getSecret, parseJsonSecret } = require('./secrets');
 
 class GoogleService {
     constructor() {
@@ -81,40 +81,7 @@ class GoogleService {
             }
             
             const extracted = sanitized.substring(startIdx, endIdx + 1);
-
-            try {
-                key = JSON.parse(extracted);
-                console.log(`[Google] Success: Service account for ${key.client_email} initialized.`);
-            } catch (innerErr) {
-                console.log(`[Google] JSON.parse failed: ${innerErr.message}. Attempting recovery...`);
-                
-                // RECOVERY: Fix common "bad escaped characters" (e.g. backslash before space or non-standard char)
-                // Use a heuristic to only fix invalid escapes while keeping \n and \"
-                let fixed = extracted
-                    .replace(/\\(?!["\\\/bfnrtu])/g, '') // Remove backslash if NOT followed by valid JSON escape char
-                    .replace(/\n/g, '\\n')             // Turn real newlines into escaped \n (common paste error)
-                    .replace(/\r/g, '');               // Clean CR
-                
-                try {
-                    key = JSON.parse(fixed);
-                    console.log(`[Google] Success via Regex Recovery: Service account for ${key.client_email}`);
-                } catch (recoveryErr) {
-                    // FINAL FALLBACK: Manual extraction of key fields if JSON structure is totally shot
-                    console.warn("[Google] Regex recovery failed. Reverting to field extraction fallback.");
-                    const emailMatch = extracted.match(/"client_email"\s*:\s*"([^"]+)"/);
-                    const keyMatch = extracted.match(/"private_key"\s*:\s*"([\s\S]+?)"/);
-                    
-                    if (emailMatch && keyMatch) {
-                        key = {
-                            client_email: emailMatch[1],
-                            private_key: keyMatch[1].replace(/\\n/g, '\n').replace(/\n/g, '\n')
-                        };
-                        console.log(`[Google] Success via Field Extraction: ${key.client_email}`);
-                    } else {
-                        throw new Error(`JSON format error: ${innerErr.message}. Position suggested: 1230. Sample chars: ${extracted.substring(1220, 1240).split('').map(c=> `[${c}:${c.charCodeAt(0)}]`).join(' ')}`);
-                    }
-                }
-            }
+            key = parseJsonSecret(extracted);
         } catch (e) {
             console.error("[Google] CRITICAL: Initialization failed:", e.message);
             throw e;
