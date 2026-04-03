@@ -56,24 +56,15 @@ class GoogleService {
     async addCalendarReminder(title, startTime) {
         await this.init();
         try {
-            // Если пришла просто дата, ставим на 1 час
             const start = new Date(startTime);
             const end = new Date(start.getTime() + 60 * 60 * 1000);
 
             const event = {
                 'summary': title,
                 'description': 'Создано ассистентом Гексли',
-                'start': {
-                    'dateTime': start.toISOString(),
-                    'timeZone': 'UTC',
-                },
-                'end': {
-                    'dateTime': end.toISOString(),
-                    'timeZone': 'UTC',
-                },
-                'reminders': {
-                    'useDefault': true
-                },
+                'start': { 'dateTime': start.toISOString(), 'timeZone': 'UTC' },
+                'end': { 'dateTime': end.toISOString(), 'timeZone': 'UTC' },
+                'reminders': { 'useDefault': true },
             };
 
             const response = await this.calendar.events.insert({
@@ -84,6 +75,38 @@ class GoogleService {
             return response.data;
         } catch (err) {
             console.error('Error creating calendar event:', err);
+            throw err;
+        }
+    }
+
+    async listCalendarEvents(maxResults = 10) {
+        await this.init();
+        try {
+            const response = await this.calendar.events.list({
+                calendarId: 'primary',
+                timeMin: (new Date()).toISOString(),
+                maxResults,
+                singleEvents: true,
+                orderBy: 'startTime',
+            });
+            return response.data.items || [];
+        } catch (err) {
+            console.error('Error listing calendar events:', err);
+            throw err;
+        }
+    }
+
+    async searchDriveFiles(query = "", pageSize = 10) {
+        await this.init();
+        try {
+            const response = await this.drive.files.list({
+                q: query ? `name contains '${query}'` : "trashed = false",
+                fields: 'files(id, name, mimeType, webViewLink)',
+                pageSize
+            });
+            return response.data.files || [];
+        } catch (err) {
+            console.error('Error searching drive files:', err);
             throw err;
         }
     }

@@ -83,8 +83,18 @@ const tools = [{
         {
             name: 'get_all_data',
             description: 'Получает список всех проектов и задач.',
+            parameters: { type: 'object' }
+        },
+        {
+            name: 'update_user_profile',
+            description: 'Обновляет долгосрочную память о пользователе (его интересы, бизнес, личные предпочтения).',
             parameters: {
-                type: 'object'
+                type: 'object',
+                properties: {
+                    interests: { type: 'string', description: 'Интересы и хобби' },
+                    businessContext: { type: 'string', description: 'Контекст бизнеса, текущие цели' },
+                    personalPreferences: { type: 'string', description: 'Предпочтения в общении или работе' }
+                }
             }
         },
         {
@@ -93,39 +103,57 @@ const tools = [{
             parameters: {
                 type: 'object',
                 properties: {
-                    name: { type: 'string', description: 'Название папки (обычно название проекта)' }
+                    name: { type: 'string', description: 'Название папки' }
                 },
                 required: ['name']
             }
         },
         {
-            name: 'google_create_reminder',
-            description: 'Создает напоминание или событие в Google Календаре.',
+            name: 'google_search_files',
+            description: 'Ищет файлы на Google Диске по названию.',
             parameters: {
                 type: 'object',
                 properties: {
-                    title: { type: 'string', description: 'Заголовок напоминания' },
-                    startTime: { type: 'string', description: 'Время начала в формате ISO (например, 2024-04-03T10:00:00Z)' }
+                    query: { type: 'string', description: 'Часть названия файла' }
+                }
+            }
+        },
+        {
+            name: 'google_create_reminder',
+            description: 'Создает событие в Google Календаре.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    title: { type: 'string', description: 'Заголовок' },
+                    startTime: { type: 'string', description: 'Время (ISO)' }
                 },
                 required: ['title', 'startTime']
             }
+        },
+        {
+            name: 'google_list_events',
+            description: 'Получает список ближайших событий из Google Календаря.',
+            parameters: { type: 'object' }
         }
     ]
 }];
 
 async function processMessage(userId, message) {
     const history = await db.getHistory(userId);
+    const profile = await db.getUserProfile(userId);
+    
+    // Формируем динамическую системную инструкцию с учетом профиля
+    const dynamicPrompt = `${PROMPT}\n\nКОНТЕКСТ ПОЛЬЗОВАТЕЛЯ (ДОЛГОСРОЧНАЯ ПАМЯТЬ):\n${JSON.stringify(profile, null, 2)}`;
+
     const contents = [...history, { role: 'user', parts: [{ text: message }] }];
     
     try {
         const ai = await getAI();
-        console.log("[AI] Sending request to gemini-2.5-flash...");
-
         const result = await ai.models.generateContent({
             model: "gemini-2.5-flash",
             contents,
             config: {
-                systemInstruction: PROMPT,
+                systemInstruction: dynamicPrompt,
                 tools: [{ functionDeclarations: tools }]
             }
         });
@@ -164,12 +192,23 @@ async function processMessage(userId, message) {
                     const projectsList = data.projects.map(p => `- ${p.name}: ${p.description}`).join('\n');
                     const tasksList = data.tasks.filter(t => t.status === 'pending').map(t => `- [${t.project}] ${t.title}`).join('\n');
                     finalOutput += `📊 Твой срез:\n\nПРОЕКТЫ:\n${projectsList || 'Нет'}\n\nЗАДАЧИ:\n${tasksList || 'Нет'}\n`;
+                } else if (call.name === 'update_user_profile') {
+                    await db.updateUserProfile(userId, args);
+                    finalOutput += `🧠 Твой профиль обновлен. Я это запомнил.\n`;
                 } else if (call.name === 'google_create_folder') {
                     const folder = await googleService.createProjectFolder(args.name);
                     finalOutput += `☁️ Папка проекта "${args.name}" создана на Google Диске (ID: ${folder.id}).\n`;
+                } else if (call.name === 'google_search_files') {
+                    const files = await googleService.searchDriveFiles(args.query);
+                    const list = files.map(f => `- ${f.name} (${f.webViewLink})`).join('\n');
+                    finalOutput += `🔎 Найдено на Диске:\n${list || 'Ничего не нашлось.'}\n`;
                 } else if (call.name === 'google_create_reminder') {
                     const event = await googleService.addCalendarReminder(args.title, args.startTime);
-                    finalOutput += `📅 Напоминание "${args.title}" добавлено в Google Календарь.\n`;
+                    finalOutput += `📅 Событие "${args.title}" добавлено в Google Календарь.\n`;
+                } else if (call.name === 'google_list_events') {
+                    const events = await googleService.listCalendarEvents();
+                    const list = events.map(e => `- ${e.summary} (${new Date(e.start.dateTime || e.start.date).toLocaleString('ru-RU')})`).join('\n');
+                    finalOutput += `🗓 Твое расписание:\n${list || 'Событий не найдено.'}\n`;
                 }
             } else if (part.text) {
                 finalOutput += part.text;

@@ -50,11 +50,24 @@ async function addHistory(userId, role, text) {
     await docRef.set({ messages }, { merge: true });
 }
 
+// Профиль пользователя (долгосрочная память)
+async function getUserProfile(userId) {
+    const snap = await db.collection('user_profile').doc(userId).get();
+    if (!snap.exists) return {};
+    return snap.data() || {};
+}
+
+async function updateUserProfile(userId, updates) {
+    await db.collection('user_profile').doc(userId).set(updates, { merge: true });
+}
+
 module.exports = {
     getDb,
     addTask,
     addProject,
     updateTask,
     getHistory,
-    addHistory
+    addHistory,
+    getUserProfile,
+    updateUserProfile
 };
