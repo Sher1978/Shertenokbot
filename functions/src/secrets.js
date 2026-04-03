@@ -9,8 +9,9 @@ const client = new SecretManagerServiceClient();
 async function getSecret(secretName) {
     // 1. Пробуем стандартное окружение
     if (process.env[secretName]) {
-        console.log(`[Secrets] Found ${secretName} in environment.`);
-        return process.env[secretName];
+        const val = process.env[secretName];
+        console.log(`[Secrets] Found ${secretName} in environment. Starts with: ${val.substring(0, 10)}... (length: ${val.length})`);
+        return val;
     }
 
     // 2. Пробуем прямое обращение к Secret Manager

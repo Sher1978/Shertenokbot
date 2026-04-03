@@ -1,18 +1,31 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 const db = require('./db');
 const { getSecret } = require('./secrets');
+const googleService = require('./google');
 
 let genAI = null;
 
 /**
  * Инициализирует Gemini AI асинхронно.
  */
+const { GoogleGenAI } = require('@google/genai');
+
+let aiClient = null;
+
+/**
+ * Инициализирует Gemini AI клиент.
+ */
 async function getAI() {
-    if (!genAI) {
-        const key = await getSecret('GEMINI_API_KEY');
-        genAI = new GoogleGenerativeAI(key);
+    if (!aiClient) {
+        try {
+            const key = await getSecret('GEMINI_API_KEY');
+            aiClient = new GoogleGenAI({ apiKey: key });
+            console.log("[AI] GoogleGenAI (v1.x) initialized.");
+        } catch (err) {
+            console.error("[AI] Failed to initialize GoogleGenAI:", err.message);
+            throw err;
+        }
     }
-    return genAI;
+    return aiClient;
 }
 
 
@@ -105,28 +118,33 @@ async function processMessage(userId, message) {
     const contents = [...history, { role: 'user', parts: [{ text: message }] }];
     
     try {
-        const aiInstance = await getAI();
-        const apiKey = await getSecret('GEMINI_API_KEY');
-        console.log(`[AI] Initializing model with key prefix: ${apiKey.substring(0, 5)}...`);
-        
-        const model = aiInstance.getGenerativeModel({ model: "gemini-1.5-flash" });
-        const googleService = require('./google');
+        const ai = await getAI();
+        console.log("[AI] Sending request to gemini-2.5-flash...");
 
-        console.log("[AI] Sending request to Gemini 1.5 Flash...");
-
-        const result = await model.generateContent({
-            contents,
-            tools,
-            systemInstruction: PROMPT
+        const result = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            systemInstruction: PROMPT,
+            tools: tools,
+            contents
         });
 
+        // В новом SDK результат обычно находится в result.response
         const response = result.response;
-        const functionCalls = response.functionCalls();
+        
+        // Обработка вызовов функций (function calls)
+        // В v1.x они могут быть в response.candidates[0].content.parts
+        const candidate = response.candidates?.[0];
+        const parts = candidate?.content?.parts || [];
+        
         let finalOutput = "";
-
-        if (functionCalls && functionCalls.length > 0) {
-            for (const call of functionCalls) {
+        
+        for (const part of parts) {
+            if (part.functionCall) {
+                const call = part.functionCall;
                 const args = call.args;
+                
+                console.log(`[AI] Function Call: ${call.name}`, args);
+
                 if (call.name === 'add_task') {
                     await db.addTask({
                         title: args.title,
@@ -155,11 +173,11 @@ async function processMessage(userId, message) {
                     const event = await googleService.addCalendarReminder(args.title, args.startTime);
                     finalOutput += `📅 Напоминание "${args.title}" добавлено в Google Календарь.\n`;
                 }
+            } else if (part.text) {
+                finalOutput += part.text;
             }
         }
 
-        const text = response.text();
-        if (text) finalOutput += text;
         if (!finalOutput) finalOutput = "Принято!";
 
         await db.addHistory(userId, 'user', message);
@@ -167,8 +185,25 @@ async function processMessage(userId, message) {
 
         return finalOutput;
     } catch (e) {
-        console.error("AI Error:", e);
-        return "Ошибка связи с интеллектом.";
+        console.error("AI Error:", e.message);
+        if (e.response && e.response.status) {
+            console.error("AI HTTP Status:", e.response.status);
+        }
+        if (e.status === 404 || (e.response && e.response.status === 404) || e.message.includes('404')) {
+            console.error("[AI] 404 Model Not Found. Listing available models...");
+            try {
+                const aiInstance = await getAI();
+                const response = await aiInstance.models.list();
+                const models = [];
+                for await (const m of response) {
+                    models.push(m.name);
+                }
+                console.error("[AI] Available models:", models.join(", "));
+            } catch (listErr) {
+                console.error("[AI] Failed to list models:", listErr.message);
+            }
+        }
+        return `Ошибка связи с интеллектом. [${e.status || 'API_ERROR'}]`;
     }
 }
 
