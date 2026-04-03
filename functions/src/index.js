@@ -82,7 +82,7 @@ async function getBot() {
 
             botInstance.on('photo', async (ctx) => {
                 try {
-                    await ctx.reply("Смотрю на фото...");
+                    await ctx.reply("Смотри внимательно...");
                     // Берем самое крупное фото
                     const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
                     const base64 = await downloadFile(fileId);
@@ -96,6 +96,43 @@ async function getBot() {
                 } catch (e) {
                     console.error("Photo processing error:", e);
                     await ctx.reply("Не удалось обработать фото.");
+                }
+            });
+
+            botInstance.on('voice', async (ctx) => {
+                try {
+                    await ctx.reply("Слушаю...");
+                    const fileId = ctx.message.voice.file_id;
+                    const base64 = await downloadFile(fileId);
+                    
+                    const response = await ai.processMessage(
+                        ctx.from.id.toString(), 
+                        ctx.message.caption || "Слушай внимательно это голосовое сообщение и ответь пользователю.",
+                        { mimeType: 'audio/ogg', data: base64 }
+                    );
+                    await ctx.reply(response);
+                } catch (e) {
+                    console.error("Voice processing error:", e);
+                    await ctx.reply("Не удалось обработать голосовое сообщение.");
+                }
+            });
+
+            botInstance.on('audio', async (ctx) => {
+                try {
+                    await ctx.reply("Изучаю аудиозапись...");
+                    const fileId = ctx.message.audio.file_id;
+                    const mimeType = ctx.message.audio.mime_type || 'audio/mpeg';
+                    const base64 = await downloadFile(fileId);
+                    
+                    const response = await ai.processMessage(
+                        ctx.from.id.toString(), 
+                        ctx.message.caption || "Проанализируй эту аудиозапись.",
+                        { mimeType, data: base64 }
+                    );
+                    await ctx.reply(response);
+                } catch (e) {
+                    console.error("Audio processing error:", e);
+                    await ctx.reply("Не удалось обработать аудио-файл.");
                 }
             });
 
