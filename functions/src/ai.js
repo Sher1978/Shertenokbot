@@ -106,8 +106,13 @@ async function processMessage(userId, message) {
     
     try {
         const aiInstance = await getAI();
-        const model = aiInstance.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const apiKey = await getSecret('GEMINI_API_KEY');
+        console.log(`[AI] Initializing model with key prefix: ${apiKey.substring(0, 5)}...`);
+        
+        const model = aiInstance.getGenerativeModel({ model: "gemini-1.5-flash" });
         const googleService = require('./google');
+
+        console.log("[AI] Sending request to Gemini 1.5 Flash...");
 
         const result = await model.generateContent({
             contents,
