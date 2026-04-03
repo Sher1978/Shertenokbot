@@ -15,14 +15,27 @@ class GoogleService {
 
         let key;
         try {
-            // Удаляем любые "невидимые" управляющие символы и нормализуем переносы
-            const cleanedJson = rawJson.replace(/[\x00-\x1F\x7F-\x9F]/g, "").trim();
-            key = JSON.parse(cleanedJson);
+            // First attempt: direct parse
+            key = JSON.parse(rawJson);
         } catch (e) {
-            console.error("JSON parse error for secret, trying fallback with newline replacement...");
-            // Если в секрете не JSON, а возможно экранированная строка
-            const fallback = rawJson.replace(/\\n/g, '\n').replace(/\\r/g, '\r');
-            key = JSON.parse(fallback);
+            try {
+                // Second attempt: remove literal newlines and control characters that often break JSON parsing
+                const cleaned = rawJson
+                    .replace(/[\x00-\x1F\x7F-\x9F]/g, "") // remove all control characters
+                    .trim();
+                key = JSON.parse(cleaned);
+            } catch (e2) {
+                console.warn("[Google] Standard JSON parse failed, trying multi-line fallback...");
+                try {
+                    // Third attempt: if it's a multiline string pasted with actual breaks
+                    const formatted = rawJson.trim().replace(/\n/g, "\\n");
+                    // We need to wrap it back if it lost the structure
+                    key = JSON.parse(formatted);
+                } catch (e3) {
+                    console.error("[Google] CRITICAL: Could not parse Service Account Secret.");
+                    throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON format error.");
+                }
+            }
         }
 
         this.auth = new google.auth.JWT(

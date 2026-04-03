@@ -20,7 +20,7 @@ async function getAI() {
     if (!aiClient) {
         try {
             const key = await getSecret('GEMINI_API_KEY');
-            aiClient = new GoogleGenAI(key);
+            aiClient = new GoogleGenAI({ apiKey: key });
             console.log("[AI] GoogleGenAI (v1.x) initialized.");
         } catch (err) {
             console.error("[AI] Failed to initialize GoogleGenAI:", err.message);
@@ -49,7 +49,7 @@ const PROMPT = `Ты персональный AI-помощник, секрет�
 `;
 
 const tools = [{
-    function_declarations: [
+    functionDeclarations: [
         {
             name: 'add_task',
             description: 'Добавляет новую задачу.',
@@ -238,17 +238,15 @@ async function processMessage(userId, message, fileData = null) {
     const contents = [...history, { role: 'user', parts: userParts }];
     
     try {
-        const genAI = await getAI();
-        const model = genAI.getGenerativeModel(
-            { model: "gemini-2.0-flash" }, 
-            { apiVersion: "v1beta" }
-        );
-
-        const result = await model.generateContent({
+        const ai = await getAI();
+        const result = await ai.models.generateContent({
+            model: "gemini-1.5-flash",
             contents,
-            tools: tools,
-            systemInstruction: { 
-                parts: [{ text: dynamicPrompt }] 
+            config: {
+                tools: tools,
+                systemInstruction: { 
+                    parts: [{ text: dynamicPrompt }] 
+                }
             }
         });
 
@@ -396,7 +394,7 @@ async function processMessage(userId, message, fileData = null) {
             console.error("[AI] 404 Model Not Found. Listing available models...");
             try {
                 const aiInstance = await getAI();
-                const response = await aiInstance.listModels();
+                const response = await aiInstance.models.list();
                 const modelNames = response.models.map(m => m.name);
                 console.error("[AI] Available models:", modelNames.join(", "));
             } catch (listErr) {
