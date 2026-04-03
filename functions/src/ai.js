@@ -123,9 +123,11 @@ async function processMessage(userId, message) {
 
         const result = await ai.models.generateContent({
             model: "gemini-2.5-flash",
-            systemInstruction: PROMPT,
-            tools: tools,
-            contents
+            contents,
+            config: {
+                systemInstruction: PROMPT,
+                tools: [{ functionDeclarations: tools }]
+            }
         });
 
         // В новом унифицированном SDK результат вызова уже содержит кандидатов
