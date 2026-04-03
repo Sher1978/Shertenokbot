@@ -20,7 +20,7 @@ async function getAI() {
     if (!aiClient) {
         try {
             const key = await getSecret('GEMINI_API_KEY');
-            aiClient = new GoogleGenAI({ apiKey: key, apiVersion: 'v1beta' });
+            aiClient = new GoogleGenAI(key);
             console.log("[AI] GoogleGenAI (v1.x) initialized.");
         } catch (err) {
             console.error("[AI] Failed to initialize GoogleGenAI:", err.message);
@@ -238,18 +238,23 @@ async function processMessage(userId, message, fileData = null) {
     const contents = [...history, { role: 'user', parts: userParts }];
     
     try {
-        const ai = await getAI();
-        const result = await ai.models.generateContent({
-            model: "gemini-1.5-flash",
+        const genAI = await getAI();
+        const model = genAI.getGenerativeModel(
+            { model: "gemini-2.0-flash" }, 
+            { apiVersion: "v1beta" }
+        );
+
+        const result = await model.generateContent({
             contents,
             tools: tools,
-            system_instruction: { 
+            systemInstruction: { 
                 parts: [{ text: dynamicPrompt }] 
             }
         });
 
-        // В новом унифицированном SDK результат вызова уже содержит кандидатов
-        const candidate = result.candidates?.[0];
+        // В новом SDK результат возвращается через response
+        const response = await result.response;
+        const candidate = response.candidates?.[0];
         const parts = candidate?.content?.parts || [];
         
         let finalOutput = "";
@@ -391,12 +396,9 @@ async function processMessage(userId, message, fileData = null) {
             console.error("[AI] 404 Model Not Found. Listing available models...");
             try {
                 const aiInstance = await getAI();
-                const response = await aiInstance.models.list();
-                const models = [];
-                for await (const m of response) {
-                    models.push(m.name);
-                }
-                console.error("[AI] Available models:", models.join(", "));
+                const response = await aiInstance.listModels();
+                const modelNames = response.models.map(m => m.name);
+                console.error("[AI] Available models:", modelNames.join(", "));
             } catch (listErr) {
                 console.error("[AI] Failed to list models:", listErr.message);
             }
