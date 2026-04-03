@@ -50,36 +50,33 @@ class GoogleService {
                 key = JSON.parse(extracted);
                 console.log(`[Google] Success: Service account for ${key.client_email} initialized.`);
             } catch (innerErr) {
-                console.log("[Google] JSON.parse failed. Analyzing characters...");
+                console.log(`[Google] JSON.parse failed: ${innerErr.message}. Attempting recovery...`);
                 
-                // Get position from error message if possible
-                const posMatch = innerErr.message.match(/at position (\d+)/);
-                const errorPos = posMatch ? parseInt(posMatch[1]) : 1230;
+                // RECOVERY: Fix common "bad escaped characters" (e.g. backslash before space or non-standard char)
+                // Use a heuristic to only fix invalid escapes while keeping \n and \"
+                let fixed = extracted
+                    .replace(/\\(?!["\\\/bfnrtu])/g, '') // Remove backslash if NOT followed by valid JSON escape char
+                    .replace(/\n/g, '\\n')             // Turn real newlines into escaped \n (common paste error)
+                    .replace(/\r/g, '');               // Clean CR
                 
-                console.log(`[Google] ERROR at position ${errorPos}. Context:`);
-                const start = Math.max(0, errorPos - 20);
-                const end = Math.min(extracted.length, errorPos + 20);
-                const context = extracted.substring(start, end);
-                const contextCodes = context.split('').map(c => `[${c}:${c.charCodeAt(0)}]`).join(' ');
-                console.log(`[Google] chars ${start}-${end}: ${contextCodes}`);
-                
-                // Maybe it's double-encoded or has base64 junk?
                 try {
-                    const decoded = Buffer.from(sanitized, 'base64').toString('utf8').replace(/\r/g, '').trim();
-                    const b64Start = decoded.indexOf('{');
-                    const b64End = decoded.lastIndexOf('}');
-                    if (b64Start !== -1 && b64End !== -1) {
-                        const b64Extracted = decoded.substring(b64Start, b64End + 1);
-                        key = JSON.parse(b64Extracted);
-                        console.log(`[Google] Success via Base64: ${key.client_email}`);
+                    key = JSON.parse(fixed);
+                    console.log(`[Google] Success via Regex Recovery: Service account for ${key.client_email}`);
+                } catch (recoveryErr) {
+                    // FINAL FALLBACK: Manual extraction of key fields if JSON structure is totally shot
+                    console.warn("[Google] Regex recovery failed. Reverting to field extraction fallback.");
+                    const emailMatch = extracted.match(/"client_email"\s*:\s*"([^"]+)"/);
+                    const keyMatch = extracted.match(/"private_key"\s*:\s*"([\s\S]+?)"/);
+                    
+                    if (emailMatch && keyMatch) {
+                        key = {
+                            client_email: emailMatch[1],
+                            private_key: keyMatch[1].replace(/\\n/g, '\n').replace(/\n/g, '\n')
+                        };
+                        console.log(`[Google] Success via Field Extraction: ${key.client_email}`);
                     } else {
-                        throw new Error("Base64 decode didn't contain JSON.");
+                        throw new Error(`JSON format error: ${innerErr.message}. Position suggested: 1230. Sample chars: ${extracted.substring(1220, 1240).split('').map(c=> `[${c}:${c.charCodeAt(0)}]`).join(' ')}`);
                     }
-                } catch (b64Error) {
-                    console.error("[Google] CRITICAL: Service Account Secret parsing failed.");
-                    console.error(`[Google] Raw preview (hex 1-5): ${rawJson.split('').slice(0, 5).map(c => c.charCodeAt(0).toString(16)).join(' ')}`);
-                    console.error(`[Google] Extracted preview: ${extracted.substring(0, 100)}...`);
-                    throw new Error(`JSON format error: ${innerErr.message}. B64 error: ${b64Error.message}`);
                 }
             }
         } catch (e) {
