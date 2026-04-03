@@ -331,8 +331,8 @@ async function processMessage(userId, message, fileData = null, currentTime = nu
                         const list = files.map(f => `- ${f.name} (${f.webViewLink})`).join('\n');
                         finalOutput += `🔎 Найдено:\n${list || 'Ничего.'}\n`;
                     } else if (name === 'google_create_reminder') {
-                        await googleService.addCalendarReminder(args.title, args.startTime, userCalendarId);
-                        finalOutput += `📅 Событие "${args.title}" добавлено.\n`;
+                        const event = await googleService.addCalendarReminder(args.title, args.startTime, userCalendarId);
+                        finalOutput += `📅 Событие "${args.title}" добавлено.\n🔗 Ссылка: ${event.htmlLink}\n`;
                     } else if (name === 'google_list_events') {
                         const events = await googleService.listCalendarEvents(userCalendarId);
                         const list = events.map(e => `- ${e.summary} (${e.start.dateTime || e.start.date})`).join('\n');
