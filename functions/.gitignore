@@ -9,6 +9,8 @@ lib/
 .env.*
 npm-debug.log*
 firebase-debug.log*
+api.txt
+token.txt
 
 # Исключаем временные файлы отладки и исправления
 fix_secrets.js

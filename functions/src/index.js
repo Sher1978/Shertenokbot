@@ -6,7 +6,7 @@ const { getSecret } = require('./secrets');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { trackUsage } = require('./db');
+const { trackUsage, getDailyStats } = require('./db');
 
 // Ответ чужаку: вежливо-недоверчивый шаблон в стиле Штирлица
 const STRANGER_RESPONSES = [
@@ -87,6 +87,7 @@ async function getBot() {
                 { command: 'projects', description: 'Список всех проектов' },
                 { command: 'tasks',    description: 'Список активных задач' },
                 { command: 'status',   description: 'Полный срез по проектам' },
+                { command: 'usage',    description: 'Статистика трат и запросов' },
                 { command: 'help',     description: 'Как пользоваться ботом' }
             ]).catch(e => console.warn('[Bot] setMyCommands failed (non-critical):', e.message));
 
@@ -121,7 +122,6 @@ async function getBot() {
                 const response = await ai.processMessage(ctx.from.id.toString(), "Покажи мои активные задачи.", null, getMskTime());
                 await ctx.reply(response);
             });
-
             botInstance.command('status', async (ctx) => {
                 const { warning } = await trackUsage(ctx.from.id.toString(), false);
                 if (warning) {
@@ -129,6 +129,26 @@ async function getBot() {
                 }
                 const response = await ai.processMessage(ctx.from.id.toString(), "Сделай полный аудит по всем моим проектам и задачам.", null, getMskTime());
                 await ctx.reply(response);
+            });
+            
+            botInstance.command('usage', async (ctx) => {
+                if (isStranger(ctx)) return;
+                
+                const now = new Date();
+                const dateStr = now.toISOString().split('T')[0];
+                const stats = await getDailyStats(dateStr);
+                
+                const emoji = parseFloat(stats.estimatedCost) > 1.0 ? '🚨' : '🟢';
+                
+                let msg = `💰 **Оперативный отчет по расходам (${dateStr})**\n\n`;
+                msg += `👤 Штирлиц (Вы): ${stats.admin} запросов\n`;
+                msg += `👥 Гости: ${stats.guests} запросов\n`;
+                msg += `📈 Итого: ${stats.total} запросов\n\n`;
+                msg += `${emoji} **Оценочная стоимость: ~$${stats.estimatedCost}**\n`;
+                msg += `_(При расчете: 2000 токенов/запрос, модель Flash)_\n\n`;
+                msg += `Центр, напоминаю: жесткий лимит в $10 установлен в Google Console. Мы в безопасности.`;
+                
+                await ctx.reply(msg, { parse_mode: 'Markdown' });
             });
 
             botInstance.on('text', async (ctx) => {

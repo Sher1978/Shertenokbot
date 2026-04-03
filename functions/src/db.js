@@ -128,6 +128,38 @@ async function trackUsage(userId, isGuest) {
     });
 }
 
+/**
+ * Получает статистику использования за конкретный день
+ * @param {string} dateStr ГГГГ-ММ-ДД
+ * @returns {Promise<{admin: number, totalGuests: number, estimatedCost: string}>}
+ */
+async function getDailyStats(dateStr) {
+    const globalRef = db.collection('usage').doc('global_' + dateStr);
+    const globalSnap = await globalRef.get();
+    const adminCount = globalSnap.exists ? (globalSnap.data().count || 0) : 0;
+    
+    // Считаем всех гостей (все документы, которые заканчиваются на _dateStr, но не global_)
+    const usageSnap = await db.collection('usage').get();
+    let guestCount = 0;
+    
+    usageSnap.forEach(doc => {
+        if (doc.id.endsWith('_' + dateStr) && !doc.id.startsWith('global_')) {
+            guestCount += (doc.data().daily || 0);
+        }
+    });
+
+    const total = adminCount + guestCount;
+    // Примерная стоимость: 2000 токенов на запрос * $0.1 / 1M токенов (в среднем)
+    const cost = (total * 2000 * (0.1 / 1000000)).toFixed(4);
+
+    return {
+        admin: adminCount,
+        guests: guestCount,
+        total: total,
+        estimatedCost: cost
+    };
+}
+
 module.exports = {
     getDb,
     addTask,
@@ -138,5 +170,6 @@ module.exports = {
     addHistoryBatch,
     getUserProfile,
     updateUserProfile,
-    trackUsage
+    trackUsage,
+    getDailyStats
 };
