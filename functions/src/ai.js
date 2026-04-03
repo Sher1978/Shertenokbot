@@ -20,8 +20,9 @@ async function getAI() {
     if (!aiClient) {
         try {
             const key = await getSecret('GEMINI_API_KEY');
-            aiClient = new GoogleGenerativeAI(key);
-            console.log("[AI] GoogleGenAI (v1.x) initialized.");
+            // Explicitly force v1 API version to avoid 404s in v1beta common with some keys
+            aiClient = new GoogleGenerativeAI(key, { apiVersion: 'v1' });
+            console.log("[AI] GoogleGenAI (API v1) initialized.");
         } catch (err) {
             console.error("[AI] Failed to initialize GoogleGenAI:", err.message);
             throw err;
@@ -222,37 +223,56 @@ async function processMessage(userId, message, fileData = null) {
         console.error("[AI] Drive memory sync error:", err.message);
     }
 
-    // Формируем динамическую системную инструкцию с учетом профиля и диска
+    // Формируем динамическую системную инструкцию с учетом профиля и диска (БАЗА)
     const dynamicPrompt = `${PROMPT}\n\nКОНТЕКСТ ПОЛЬЗОВАТЕЛЯ (FIRESTORE):\n${JSON.stringify(profile, null, 2)}${driveContext}`;
 
-    const userParts = [{ text: message || "Проанализируй этот файл." }];
+    // Перемещаем формирование userParts сюда, чтобы использовать его единообразно
+    const combinedPrompt = `${dynamicPrompt}\n\nUSER MESSAGE:\n${message || "Проанализируй этот файл."}`;
+    const currentUserParts = [{ text: combinedPrompt }];
+    
     if (fileData) {
-        userParts.push({
+        currentUserParts.push({
             inlineData: {
                 mimeType: fileData.mimeType,
-                data: fileData.data // base64
+                data: fileData.data
             }
         });
     }
 
-    const contents = [...history, { role: 'user', parts: userParts }];
+    // История + текущее сообщение
+    const finalContents = [...history, { role: 'user', parts: currentUserParts }];
     
     try {
         const genAIInstance = await getAI();
-        const modelName = "gemini-1.5-flash-latest";
-        console.log(`[AI] Using model: ${modelName}`);
-        
-        const model = genAIInstance.getGenerativeModel({ 
-            model: modelName,
-            tools: tools,
-            systemInstruction: dynamicPrompt
-        });
+        // Используем проверенный список моделей (gemini-pro первым, как в стабильном Sprint Bot)
+        const availableModels = ["gemini-pro", "gemini-1.5-flash", "gemini-1.0-pro"];
+        let result = null;
+        let lastError = null;
 
-        const result = await model.generateContent({
-            contents: contents
-        });
+        for (const modelName of availableModels) {
+            try {
+                console.log(`[AI] Attempting model: ${modelName}`);
+                const model = genAIInstance.getGenerativeModel({ model: modelName });
 
-        // В новом SDK результат возвращается через response
+                // We include tools only if we want to risk it, but let's keep them for now
+                // Actually, let's keep it simple: model.generateContent(finalContents)
+                result = await model.generateContent({
+                    contents: finalContents,
+                    tools: tools 
+                });
+
+                console.log(`[AI] SUCCESS with model: ${modelName}`);
+                break; 
+            } catch (err) {
+                lastError = err;
+                const status = err.status || (err.response && err.response.status);
+                console.warn(`[AI] Model ${modelName} failed. Status: ${status}. Error: ${err.message}`);
+                continue;
+            }
+        }
+
+        if (!result) throw lastError;
+
         const response = await result.response;
         const candidate = response.candidates?.[0];
         const parts = candidate?.content?.parts || [];

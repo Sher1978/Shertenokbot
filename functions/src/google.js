@@ -11,30 +11,75 @@ class GoogleService {
     async init() {
         if (this.auth) return;
 
-        const rawJson = await getSecret('GOOGLE_SERVICE_ACCOUNT_JSON');
+        let rawJson = await getSecret('GOOGLE_SERVICE_ACCOUNT_JSON');
 
         let key;
         try {
-            // Layer 1: Extraction logic (Regex) - Look for JSON anywhere in the string
-            const match = rawJson.match(/\{[\s\S]*\}/);
-            let extracted = match ? match[0] : rawJson.trim();
+            // Extreme Sanitization
+            // 1. Remove BOM (Byte Order Mark) if present
+            if (rawJson.charCodeAt(0) === 0xFEFF) {
+                rawJson = rawJson.slice(1);
+            }
+            
+            // 2. Remove any non-printable control characters 
+            // except for common whitespace (space, tab, newline, carriage return)
+            // This hex range [00-1F] covers most problematic chars
+            let sanitized = rawJson.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+            
+            // 3. Remove Windows/Unix mixed line endings
+            sanitized = sanitized.replace(/\r/g, '').trim();
+
+            // 4. FIX: Handle common JSON escaping issues in private_key
+            // Sometimes secrets have literal "\n" strings that should be escaped as "\\n" 
+            // OR they have stray backslashes before characters they shouldn't escape.
+            // We'll try to normalize newlines specifically.
+            // sanitized = sanitized.replace(/([^\\])\\n/g, '$1\\\\n'); 
+            // Actually, let's just log the error point first to be SURE what we are fixing.
+
+            // 4. Refined extraction: find the outermost { } block
+            const startIdx = sanitized.indexOf('{');
+            const endIdx = sanitized.lastIndexOf('}');
+            
+            if (startIdx === -1 || endIdx === -1 || endIdx < startIdx) {
+                throw new Error("No JSON object found in secret.");
+            }
+            
+            const extracted = sanitized.substring(startIdx, endIdx + 1);
 
             try {
                 key = JSON.parse(extracted);
-                console.log(`[Google] Success: Found service account for ${key.client_email}`);
+                console.log(`[Google] Success: Service account for ${key.client_email} initialized.`);
             } catch (innerErr) {
-                // Layer 2: Base64 fallback (common for manual secret storage)
-                console.log("[Google] Inner parse failed, trying Base64 decode...");
+                console.log("[Google] JSON.parse failed. Analyzing characters...");
+                
+                // Get position from error message if possible
+                const posMatch = innerErr.message.match(/at position (\d+)/);
+                const errorPos = posMatch ? parseInt(posMatch[1]) : 1230;
+                
+                console.log(`[Google] ERROR at position ${errorPos}. Context:`);
+                const start = Math.max(0, errorPos - 20);
+                const end = Math.min(extracted.length, errorPos + 20);
+                const context = extracted.substring(start, end);
+                const contextCodes = context.split('').map(c => `[${c}:${c.charCodeAt(0)}]`).join(' ');
+                console.log(`[Google] chars ${start}-${end}: ${contextCodes}`);
+                
+                // Maybe it's double-encoded or has base64 junk?
                 try {
-                    const decoded = Buffer.from(rawJson.trim(), 'base64').toString('utf8');
-                    const b64Match = decoded.match(/\{[\s\S]*\}/);
-                    key = JSON.parse(b64Match ? b64Match[0] : decoded);
-                    console.log(`[Google] Success via Base64: ${key.client_email}`);
+                    const decoded = Buffer.from(sanitized, 'base64').toString('utf8').replace(/\r/g, '').trim();
+                    const b64Start = decoded.indexOf('{');
+                    const b64End = decoded.lastIndexOf('}');
+                    if (b64Start !== -1 && b64End !== -1) {
+                        const b64Extracted = decoded.substring(b64Start, b64End + 1);
+                        key = JSON.parse(b64Extracted);
+                        console.log(`[Google] Success via Base64: ${key.client_email}`);
+                    } else {
+                        throw new Error("Base64 decode didn't contain JSON.");
+                    }
                 } catch (b64Error) {
                     console.error("[Google] CRITICAL: Service Account Secret parsing failed.");
-                    console.error(`[Google] Raw preview: ${rawJson.substring(0, 50).replace(/\n/g, " ")}...`);
-                    console.error(`[Google] Raw length: ${rawJson.length}`);
-                    throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON format error.");
+                    console.error(`[Google] Raw preview (hex 1-5): ${rawJson.split('').slice(0, 5).map(c => c.charCodeAt(0).toString(16)).join(' ')}`);
+                    console.error(`[Google] Extracted preview: ${extracted.substring(0, 100)}...`);
+                    throw new Error(`JSON format error: ${innerErr.message}. B64 error: ${b64Error.message}`);
                 }
             }
         } catch (e) {
