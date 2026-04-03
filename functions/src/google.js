@@ -15,11 +15,14 @@ class GoogleService {
 
         let key;
         try {
-            key = JSON.parse(rawJson);
+            // Удаляем любые "невидимые" управляющие символы и нормализуем переносы
+            const cleanedJson = rawJson.replace(/[\x00-\x1F\x7F-\x9F]/g, "").trim();
+            key = JSON.parse(cleanedJson);
         } catch (e) {
-            // Если в секрете не JSON, а возможно экранированная строка, пробуем обработать
-            console.error("JSON parse error for secret, trying fallback...");
-            key = JSON.parse(rawJson.replace(/\\n/g, '\n'));
+            console.error("JSON parse error for secret, trying fallback with newline replacement...");
+            // Если в секрете не JSON, а возможно экранированная строка
+            const fallback = rawJson.replace(/\\n/g, '\n').replace(/\\r/g, '\r');
+            key = JSON.parse(fallback);
         }
 
         this.auth = new google.auth.JWT(

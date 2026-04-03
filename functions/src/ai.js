@@ -244,7 +244,7 @@ async function processMessage(userId, message, fileData = null) {
             contents,
             config: {
                 systemInstruction: dynamicPrompt,
-                tools: [{ functionDeclarations: tools }]
+                tools: tools, // The tools variable already has the correct [{functionDeclarations: [...]}] structure
             }
         });
 
