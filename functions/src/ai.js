@@ -20,9 +20,10 @@ async function getAI() {
     if (!aiClient) {
         try {
             const key = await getSecret('GEMINI_API_KEY');
-            // Explicitly force v1 API version to avoid 404s in v1beta common with some keys
-            aiClient = new GoogleGenerativeAI(key, { apiVersion: 'v1' });
-            console.log("[AI] GoogleGenAI (API v1) initialized.");
+            // The GoogleGenerativeAI constructor only takes the API key string.
+            // Extra parameters should be passed to getGenerativeModel if needed.
+            aiClient = new GoogleGenerativeAI(key);
+            console.log("[AI] GoogleGenAI client initialized.");
         } catch (err) {
             console.error("[AI] Failed to initialize GoogleGenAI:", err.message);
             throw err;
@@ -245,7 +246,8 @@ async function processMessage(userId, message, fileData = null) {
     try {
         const genAIInstance = await getAI();
         // Используем проверенный список моделей (gemini-pro первым, как в стабильном Sprint Bot)
-        const availableModels = ["gemini-pro", "gemini-1.5-flash", "gemini-1.0-pro"];
+        // Modern models like gemini-1.5-flash and gemini-1.5-pro are more reliable.
+        const availableModels = ["gemini-1.5-flash", "gemini-1.5-pro"];
         let result = null;
         let lastError = null;
 
@@ -424,7 +426,7 @@ async function processMessage(userId, message, fileData = null) {
                 console.error("[AI] Failed to list models:", listErr.message);
             }
         }
-        return `Ошибка связи с интеллектом. [${e.status || 'API_ERROR'}]`;
+        return `Ошибка связи с интеллектом. [${e.status || 'ERR'}] ${e.message ? e.message.substring(0, 50) : ''}`;
     }
 }
 

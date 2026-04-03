@@ -149,7 +149,8 @@ async function getBot() {
 exports.bot = onRequest({ 
     region: "us-central1",
     memory: "256MiB",
-    maxInstances: 10
+    maxInstances: 10,
+    secrets: ["GEMINI_API_KEY", "TELEGRAM_BOT_TOKEN"]
 }, async (req, res) => {
     try {
         const bot = await getBot();
