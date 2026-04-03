@@ -20,7 +20,7 @@ async function getAI() {
     if (!aiClient) {
         try {
             const key = await getSecret('GEMINI_API_KEY');
-            aiClient = new GoogleGenAI({ apiKey: key });
+            aiClient = new GoogleGenAI({ apiKey: key, apiVersion: 'v1beta' });
             console.log("[AI] GoogleGenAI (v1.x) initialized.");
         } catch (err) {
             console.error("[AI] Failed to initialize GoogleGenAI:", err.message);
@@ -49,7 +49,7 @@ const PROMPT = `Ты персональный AI-помощник, секрет�
 `;
 
 const tools = [{
-    functionDeclarations: [
+    function_declarations: [
         {
             name: 'add_task',
             description: 'Добавляет новую задачу.',
@@ -242,9 +242,9 @@ async function processMessage(userId, message, fileData = null) {
         const result = await ai.models.generateContent({
             model: "gemini-1.5-flash",
             contents,
-            config: {
-                systemInstruction: dynamicPrompt,
-                tools: tools, // The tools variable already has the correct [{functionDeclarations: [...]}] structure
+            tools: tools,
+            system_instruction: { 
+                parts: [{ text: dynamicPrompt }] 
             }
         });
 
