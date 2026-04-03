@@ -15,22 +15,30 @@ class GoogleService {
 
         let key;
         try {
-            // 1. Direct parse
+            // 1. Direct parse (ideal case)
             key = JSON.parse(rawJson);
         } catch (e) {
             console.warn("[Google] Standard JSON parse failed, trying fallbacks...");
             try {
-                // 2. Handle unescaped newlines inside string literals (common paste error)
-                // We'll replace real newlines with escaped ones.
-                const cleaned = rawJson.replace(/\r?\n/g, "\\n");
+                // 2. Remove any "JSON" or code block wrappers if copied from a chat
+                let cleaned = rawJson.replace(/```json|```/g, "").trim();
+                // 3. Handle unescaped newlines and replace literal \n with real newlines for the private_key
+                cleaned = cleaned.replace(/\r?\n/g, ""); // Remove real newlines first to flatten
                 key = JSON.parse(cleaned);
             } catch (e2) {
                 try {
-                    // 3. Remove all control characters and trim
-                    const stripped = rawJson.replace(/[\x00-\x1F\x7F-\x9F]/g, "").trim();
-                    key = JSON.parse(stripped);
+                    // 4. Most aggressive: keep only printable characters and try to extract the JSON part
+                    const start = rawJson.indexOf('{');
+                    const end = rawJson.lastIndexOf('}');
+                    if (start !== -1 && end !== -1) {
+                        const extracted = rawJson.substring(start, end + 1);
+                        key = JSON.parse(extracted);
+                    } else {
+                        throw new Error("No JSON object markers found.");
+                    }
                 } catch (e3) {
                     console.error("[Google] CRITICAL: Could not parse Service Account Secret.");
+                    console.error("[Google] Raw length:", rawJson ? rawJson.length : 0);
                     throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON format error.");
                 }
             }

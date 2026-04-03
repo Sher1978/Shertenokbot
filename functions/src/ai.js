@@ -9,7 +9,7 @@ const fileIdCache = new Map(); // Кэш для ID файлов (в памяти
 /**
  * Инициализирует Gemini AI асинхронно.
  */
-const { GoogleGenAI } = require('@google/genai');
+const { GoogleGenerativeAI } = require('@google/genai');
 
 let aiClient = null;
 
@@ -20,7 +20,7 @@ async function getAI() {
     if (!aiClient) {
         try {
             const key = await getSecret('GEMINI_API_KEY');
-            aiClient = new GoogleGenAI({ apiKey: key });
+            aiClient = new GoogleGenerativeAI(key);
             console.log("[AI] GoogleGenAI (v1.x) initialized.");
         } catch (err) {
             console.error("[AI] Failed to initialize GoogleGenAI:", err.message);
