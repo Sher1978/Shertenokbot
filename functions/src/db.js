@@ -72,6 +72,62 @@ async function updateUserProfile(userId, updates) {
     await db.collection('user_profile').doc(userId).set(updates, { merge: true });
 }
 
+/**
+ * Трекинг использования для гостей и общего лимита
+ * @param {string} userId
+ * @param {boolean} isGuest
+ * @returns {Promise<{canAnswer: boolean, warning: boolean}>}
+ */
+async function trackUsage(userId, isGuest) {
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0]; // ГГГГ-ММ-ДД
+    const minTimestamp = Math.floor(now.getTime() / 60000); // Текущая минута
+
+    const globalRef = db.collection('usage').doc('global_' + dateStr);
+    const userRef = db.collection('usage').doc(userId + '_' + dateStr);
+
+    return await db.runTransaction(async (transaction) => {
+        const globalSnap = await transaction.get(globalRef);
+        const userSnap = await transaction.get(userRef);
+
+        let globalData = globalSnap.exists ? globalSnap.data() : { count: 0 };
+        let userData = userSnap.exists ? userSnap.data() : { daily: 0, lastMin: 0, minCount: 0 };
+        let limitReached = false;
+
+        // 1. Проверка для гостя
+        if (isGuest) {
+            // Лимит по минутам (3/мин)
+            if (userData.lastMin === minTimestamp) {
+                if (userData.minCount >= 3) return { canAnswer: false, warning: false, limitReached: false };
+                userData.minCount++;
+                if (userData.minCount === 3) limitReached = true;
+            } else {
+                userData.lastMin = minTimestamp;
+                userData.minCount = 1;
+            }
+
+            // Лимит по дням (10/день)
+            if (userData.daily >= 10) return { canAnswer: false, warning: false, limitReached: false };
+            userData.daily++;
+            if (userData.daily === 10) limitReached = true;
+        } else {
+            // Для админа только инкрементим глобальный счетчик
+            globalData.count = (globalData.count || 0) + 1;
+        }
+
+        // Обновляем данные
+        transaction.set(globalRef, globalData, { merge: true });
+        if (isGuest) {
+            transaction.set(userRef, userData, { merge: true });
+        }
+
+        // Предупреждение админу
+        const warning = !isGuest && globalData.count === 1300;
+
+        return { canAnswer: true, warning, limitReached };
+    });
+}
+
 module.exports = {
     getDb,
     addTask,
@@ -81,5 +137,6 @@ module.exports = {
     addHistory,
     addHistoryBatch,
     getUserProfile,
-    updateUserProfile
+    updateUserProfile,
+    trackUsage
 };

@@ -4,6 +4,9 @@ const ai = require('./ai');
 const { OWNER_ID } = require('./ai');
 const { getSecret } = require('./secrets');
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const { trackUsage } = require('./db');
 
 // Ответ чужаку: вежливо-недоверчивый шаблон в стиле Штирлица
 const STRANGER_RESPONSES = [
@@ -15,6 +18,13 @@ const STRANGER_REDIRECT = [
     'Проверка не пройдена. По вопросам доступа обращайтесь в канцелярию за бумагой. Или напрямую к Штандартенфюреру @Sherlockdxb. Он всё решит.',
     'Штирлиц закурил. Неправильный пароль — очевидный провал. За бумагой — к Штандартенфюреру @Sherlockdxb.',
     'Полномочий не предъявлены. Связьтесь с Штандартенфюрером @Sherlockdxb — он выдаст допуск.',
+];
+const STRANGER_SILENCE = [
+    'Штирлиц знал: экономия — это не только когда мало тратишь, но и когда не даешь тратить другим.',
+    'Краткость — признак настоящего разведчика.',
+    'Разговор окончен. Штирлиц ушел в глубокое подполье.',
+    'Связь прервана. Передатчик Плейшнера перегрелся.',
+    'Явка провалена. Заходите в другой раз.',
 ];
 
 function isStranger(ctx) {
@@ -28,7 +38,7 @@ function replyStranger(ctx) {
 }
 
 let botInstance = null;
-// Force deploy timestamp: 2026-04-03 02:02
+// Force deploy timestamp: 2026-04-03 13:55 (Migration to new bot)
 
 
 /**
@@ -55,25 +65,60 @@ async function getBot() {
             // /wake — мгновенный ответ без AI, чтобы "разбудить" функцию
             botInstance.command('wake', (ctx) => ctx.reply('⚡ Штирлиц здесь! Готов к работе. Можешь писать.'));
 
-            botInstance.start((ctx) => ctx.reply('Привет! Твой системный компаньон Штирлиц. Я готов в облаке!'));
+            botInstance.start(async (ctx) => {
+                const photoPath = path.join(__dirname, 'welcome.png');
+                if (fs.existsSync(photoPath)) {
+                    await ctx.replyWithPhoto({ source: fs.createReadStream(photoPath) }, {
+                        caption: '🧥 Штирлиц смотрел на вас долгим, немигающим взглядом. \n\n— Приветствую. Я Штирлиц, ваш связной в облаке. Докладывайте обстановку.'
+                    });
+                } else {
+                    await ctx.reply('Привет! Твой системный компаньон Штирлиц. Я готов в облаке!');
+                }
+            });
             
             botInstance.command('projects', async (ctx) => {
+                const { warning } = await trackUsage(ctx.from.id.toString(), false);
+                if (warning) {
+                    await ctx.reply("🧥 Штирлиц, Центр сообщает: лимит бесплатных шифровок на исходе (использовано 1300 из 1500). Пора экономить.");
+                }
                 const response = await ai.processMessage(ctx.from.id.toString(), "Покажи мои проекты.");
                 await ctx.reply(response);
             });
 
             botInstance.command('tasks', async (ctx) => {
+                const { warning } = await trackUsage(ctx.from.id.toString(), false);
+                if (warning) {
+                    await ctx.reply("🧥 Штирлиц, Центр сообщает: лимит бесплатных шифровок на исходе (использовано 1300 из 1500). Пора экономить.");
+                }
                 const response = await ai.processMessage(ctx.from.id.toString(), "Покажи мои активные задачи.");
                 await ctx.reply(response);
             });
 
             botInstance.command('status', async (ctx) => {
+                const { warning } = await trackUsage(ctx.from.id.toString(), false);
+                if (warning) {
+                    await ctx.reply("🧥 Штирлиц, Центр сообщает: лимит бесплатных шифровок на исходе (использовано 1300 из 1500). Пора экономить.");
+                }
                 const response = await ai.processMessage(ctx.from.id.toString(), "Сделай полный аудит по всем моим проектам и задачам.");
                 await ctx.reply(response);
             });
 
             botInstance.on('text', async (ctx) => {
-                if (isStranger(ctx)) return replyStranger(ctx);
+                if (isStranger(ctx)) {
+                    const { canAnswer, limitReached } = await trackUsage(ctx.from.id.toString(), true);
+                    if (!canAnswer) return; // Молчание
+                    await replyStranger(ctx);
+                    if (limitReached) {
+                        const s = STRANGER_SILENCE[Math.floor(Math.random() * STRANGER_SILENCE.length)];
+                        await ctx.reply(`🧥 ${s}`);
+                    }
+                    return;
+                }
+
+                const { warning } = await trackUsage(ctx.from.id.toString(), false);
+                if (warning) {
+                    await ctx.reply("🧥 Штирлиц, Центр сообщает: лимит бесплатных шифровок на исходе (использовано 1300 из 1500). Пора экономить.");
+                }
                 try {
                     const response = await ai.processMessage(ctx.from.id.toString(), ctx.message.text);
                     await ctx.reply(response);
@@ -90,7 +135,20 @@ async function getBot() {
             };
 
             botInstance.on('document', async (ctx) => {
-                if (isStranger(ctx)) return replyStranger(ctx);
+                if (isStranger(ctx)) {
+                    const { canAnswer, limitReached } = await trackUsage(ctx.from.id.toString(), true);
+                    if (!canAnswer) return;
+                    await replyStranger(ctx);
+                    if (limitReached) {
+                        const s = STRANGER_SILENCE[Math.floor(Math.random() * STRANGER_SILENCE.length)];
+                        await ctx.reply(`🧥 ${s}`);
+                    }
+                    return;
+                }
+                const { warning } = await trackUsage(ctx.from.id.toString(), false);
+                if (warning) {
+                    await ctx.reply("🧥 Штирлиц, Центр сообщает: лимит бесплатных шифровок на исходе (использовано 1300 из 1500). Пора экономить.");
+                }
                 try {
                     await ctx.reply("Секунду, изучаю документ...");
                     const fileId = ctx.message.document.file_id;
@@ -110,7 +168,20 @@ async function getBot() {
             });
 
             botInstance.on('photo', async (ctx) => {
-                if (isStranger(ctx)) return replyStranger(ctx);
+                if (isStranger(ctx)) {
+                    const { canAnswer, limitReached } = await trackUsage(ctx.from.id.toString(), true);
+                    if (!canAnswer) return;
+                    await replyStranger(ctx);
+                    if (limitReached) {
+                        const s = STRANGER_SILENCE[Math.floor(Math.random() * STRANGER_SILENCE.length)];
+                        await ctx.reply(`🧥 ${s}`);
+                    }
+                    return;
+                }
+                const { warning } = await trackUsage(ctx.from.id.toString(), false);
+                if (warning) {
+                    await ctx.reply("🧥 Штирлиц, Центр сообщает: лимит бесплатных шифровок на исходе (использовано 1300 из 1500). Пора экономить.");
+                }
                 try {
                     await ctx.reply("Смотри внимательно...");
                     // Берем самое крупное фото
@@ -130,7 +201,20 @@ async function getBot() {
             });
 
             botInstance.on('voice', async (ctx) => {
-                if (isStranger(ctx)) return replyStranger(ctx);
+                if (isStranger(ctx)) {
+                    const { canAnswer, limitReached } = await trackUsage(ctx.from.id.toString(), true);
+                    if (!canAnswer) return;
+                    await replyStranger(ctx);
+                    if (limitReached) {
+                        const s = STRANGER_SILENCE[Math.floor(Math.random() * STRANGER_SILENCE.length)];
+                        await ctx.reply(`🧥 ${s}`);
+                    }
+                    return;
+                }
+                const { warning } = await trackUsage(ctx.from.id.toString(), false);
+                if (warning) {
+                    await ctx.reply("🧥 Штирлиц, Центр сообщает: лимит бесплатных шифровок на исходе (использовано 1300 из 1500). Пора экономить.");
+                }
                 try {
                     await ctx.reply("Слушаю...");
                     const fileId = ctx.message.voice.file_id;
@@ -149,7 +233,20 @@ async function getBot() {
             });
 
             botInstance.on('audio', async (ctx) => {
-                if (isStranger(ctx)) return replyStranger(ctx);
+                if (isStranger(ctx)) {
+                    const { canAnswer, limitReached } = await trackUsage(ctx.from.id.toString(), true);
+                    if (!canAnswer) return;
+                    await replyStranger(ctx);
+                    if (limitReached) {
+                        const s = STRANGER_SILENCE[Math.floor(Math.random() * STRANGER_SILENCE.length)];
+                        await ctx.reply(`🧥 ${s}`);
+                    }
+                    return;
+                }
+                const { warning } = await trackUsage(ctx.from.id.toString(), false);
+                if (warning) {
+                    await ctx.reply("🧥 Штирлиц, Центр сообщает: лимит бесплатных шифровок на исходе (использовано 1300 из 1500). Пора экономить.");
+                }
                 try {
                     await ctx.reply("Изучаю аудиозапись...");
                     const fileId = ctx.message.audio.file_id;
