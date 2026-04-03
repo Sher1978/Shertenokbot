@@ -120,10 +120,11 @@ class GoogleService {
             throw e;
         }
 
+        const normalizedPem = this.normalizePem(key.private_key);
+
         // OpenSSL 3 fix for Node.js 17/18/20+: 
         // The underlying 'jws' library (used by google-auth-library) can fail with 
         // ERR_OSSL_UNSUPPORTED when given raw PEM strings for certain old-format keys.
-        // We MUST ensure the PEM is in a strictly valid format with proper newlines.
         // We MUST ensure the PEM is in a strictly valid format with proper newlines.
         
         // Validation check for Node 20 / OpenSSL 3 connectivity
