@@ -138,14 +138,24 @@ const tools = [{
     ]
 }];
 
-async function processMessage(userId, message) {
+async function processMessage(userId, message, fileData = null) {
     const history = await db.getHistory(userId);
     const profile = await db.getUserProfile(userId);
     
     // Формируем динамическую системную инструкцию с учетом профиля
     const dynamicPrompt = `${PROMPT}\n\nКОНТЕКСТ ПОЛЬЗОВАТЕЛЯ (ДОЛГОСРОЧНАЯ ПАМЯТЬ):\n${JSON.stringify(profile, null, 2)}`;
 
-    const contents = [...history, { role: 'user', parts: [{ text: message }] }];
+    const userParts = [{ text: message || "Проанализируй этот файл." }];
+    if (fileData) {
+        userParts.push({
+            inlineData: {
+                mimeType: fileData.mimeType,
+                data: fileData.data // base64
+            }
+        });
+    }
+
+    const contents = [...history, { role: 'user', parts: userParts }];
     
     try {
         const ai = await getAI();
