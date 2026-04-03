@@ -1,8 +1,31 @@
 const { onRequest } = require('firebase-functions/v2/https');
 const { Telegraf } = require('telegraf');
 const ai = require('./ai');
+const { OWNER_ID } = require('./ai');
 const { getSecret } = require('./secrets');
 const axios = require('axios');
+
+// Ответ чужаку: вежливо-недоверчивый шаблон в стиле Штирлица
+const STRANGER_RESPONSES = [
+    'Штирлиц внезапно осознал, что его никто не предупредил.\n\nПароль?',
+    'Остановитесь. Кто вас направил?\n\nИнструкции: назовите секретную фразу.',
+    'Штирлиц смотрел на экран. Потом посмотрел ещё раз. Это точно был не Центр.\nСообщите кодовое слово.',
+];
+const STRANGER_REDIRECT = [
+    'Проверка не пройдена. По вопросам доступа обращайтесь в канцелярию за бумагой. Или напрямую к Штандартенфюреру @Sherlockdxb. Он всё решит.',
+    'Штирлиц закурил. Неправильный пароль — очевидный провал. За бумагой — к Штандартенфюреру @Sherlockdxb.',
+    'Полномочий не предъявлены. Связьтесь с Штандартенфюрером @Sherlockdxb — он выдаст допуск.',
+];
+
+function isStranger(ctx) {
+    return OWNER_ID !== 'REPLACE_WITH_YOUR_TELEGRAM_ID' && ctx.from.id.toString() !== OWNER_ID;
+}
+
+function replyStranger(ctx) {
+    const r = STRANGER_RESPONSES[Math.floor(Math.random() * STRANGER_RESPONSES.length)];
+    const d = STRANGER_REDIRECT[Math.floor(Math.random() * STRANGER_REDIRECT.length)];
+    return ctx.reply(`${r}\n\n${d}`);
+}
 
 let botInstance = null;
 // Force deploy timestamp: 2026-04-03 02:02
@@ -50,6 +73,7 @@ async function getBot() {
             });
 
             botInstance.on('text', async (ctx) => {
+                if (isStranger(ctx)) return replyStranger(ctx);
                 try {
                     const response = await ai.processMessage(ctx.from.id.toString(), ctx.message.text);
                     await ctx.reply(response);
@@ -66,6 +90,7 @@ async function getBot() {
             };
 
             botInstance.on('document', async (ctx) => {
+                if (isStranger(ctx)) return replyStranger(ctx);
                 try {
                     await ctx.reply("Секунду, изучаю документ...");
                     const fileId = ctx.message.document.file_id;
@@ -85,6 +110,7 @@ async function getBot() {
             });
 
             botInstance.on('photo', async (ctx) => {
+                if (isStranger(ctx)) return replyStranger(ctx);
                 try {
                     await ctx.reply("Смотри внимательно...");
                     // Берем самое крупное фото
@@ -104,6 +130,7 @@ async function getBot() {
             });
 
             botInstance.on('voice', async (ctx) => {
+                if (isStranger(ctx)) return replyStranger(ctx);
                 try {
                     await ctx.reply("Слушаю...");
                     const fileId = ctx.message.voice.file_id;
@@ -122,6 +149,7 @@ async function getBot() {
             });
 
             botInstance.on('audio', async (ctx) => {
+                if (isStranger(ctx)) return replyStranger(ctx);
                 try {
                     await ctx.reply("Изучаю аудиозапись...");
                     const fileId = ctx.message.audio.file_id;
