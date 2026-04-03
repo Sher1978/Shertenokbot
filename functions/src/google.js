@@ -8,6 +8,39 @@ class GoogleService {
         this.auth = null;
     }
 
+    normalizePem(pem) {
+        if (!pem || typeof pem !== 'string') return pem;
+        // 1. Force convert any literal "\n" strings into real newlines
+        // 2. Remove all \r and leading/trailing whitespace
+        let clean = pem.replace(/\\n/g, '\n').replace(/\r/g, '').trim();
+        
+        // 3. Extract header, footer, and body
+        const headerMatch = clean.match(/-----BEGIN[^-]+-----/);
+        const footerMatch = clean.match(/-----END[^-]+-----/);
+        
+        if (!headerMatch || !footerMatch) {
+            console.warn("[Google] PEM formatting: missing headers/footers. Attempting raw wrap.");
+            // If just raw base64, we might need to guess the headers, but usually it's better to fail 
+            // or just try to wrap it. For now, assume it's okay if headers are missing.
+            return clean;
+        }
+
+        const header = headerMatch[0];
+        const footer = footerMatch[0];
+        
+        // Clean the body: remove headers, footers and ALL whitespace
+        let body = clean
+            .replace(header, '')
+            .replace(footer, '')
+            .replace(/\s/g, ''); 
+
+        // 4. Reconstruct with standard 64-character line lengths
+        const lines = body.match(/.{1,64}/g) || [];
+        const reconstructed = `${header}\n${lines.join('\n')}\n${footer}\n`;
+        
+        return reconstructed;
+    }
+
     async init() {
         if (this.auth) return;
 
@@ -84,27 +117,30 @@ class GoogleService {
             throw e;
         }
 
-        // OpenSSL 3 fix for Node.js 20: pass a KeyObject instead of a raw PEM string.
-        // The old `jws` library (used inside google-auth-library) calls crypto.createSign(pem)
-        // which fails with ERR_OSSL_UNSUPPORTED on PKCS#8 keys in OpenSSL 3.
-        // Passing a pre-created KeyObject bypasses that legacy code path.
+        // OpenSSL 3 fix for Node.js 17/18/20+: 
+        // The underlying 'jws' library (used by google-auth-library) can fail with 
+        // ERR_OSSL_UNSUPPORTED when given raw PEM strings for certain old-format keys.
+        // We MUST ensure the PEM is in a strictly valid format with proper newlines.
         const { createPrivateKey } = require('crypto');
         const { JWT } = require('google-auth-library');
 
-        let privateKeyObject;
+        const normalizedPem = this.normalizePem(key.private_key);
+        let authKey;
+
         try {
-            privateKeyObject = createPrivateKey(key.private_key);
-            console.log('[Google] Private key parsed as KeyObject successfully.');
+            // First attempt: use the normalized PEM string with createPrivateKey
+            // This is the most reliable way in Node 20 to avoid OpenSSL decoder issues.
+            authKey = createPrivateKey(normalizedPem);
+            console.log('[Google] Private key successfully decoded into KeyObject.');
         } catch (keyErr) {
-            console.error('[Google] createPrivateKey failed:', keyErr.message);
-            // If key has wrong newlines, try fixing them
-            const fixedPem = key.private_key.replace(/\\n/g, '\n');
-            privateKeyObject = createPrivateKey(fixedPem);
+            console.error('[Google] createPrivateKey failed despite normalization:', keyErr.message);
+            // Fallback: pass the string directly and hope the higher-level lib handles it.
+            authKey = normalizedPem;
         }
 
         this.auth = new JWT({
             email: key.client_email,
-            key: privateKeyObject,
+            key: authKey,
             scopes: [
                 'https://www.googleapis.com/auth/drive',
                 'https://www.googleapis.com/auth/calendar'
@@ -117,13 +153,16 @@ class GoogleService {
 
     }
 
-    async createProjectFolder(projectName) {
+    async createProjectFolder(projectName, parentId = null) {
         await this.init();
         try {
             const fileMetadata = {
                 'name': projectName,
                 'mimeType': 'application/vnd.google-apps.folder'
             };
+            if (parentId) {
+                fileMetadata.parents = [parentId];
+            }
             const file = await this.drive.files.create({
                 resource: fileMetadata,
                 fields: 'id, name'
@@ -136,7 +175,7 @@ class GoogleService {
         }
     }
 
-    async addCalendarReminder(title, startTime) {
+    async addCalendarReminder(title, startTime, calendarId = 'primary') {
         await this.init();
         try {
             const start = new Date(startTime);
@@ -151,7 +190,7 @@ class GoogleService {
             };
 
             const response = await this.calendar.events.insert({
-                calendarId: 'primary',
+                calendarId,
                 resource: event,
             });
             console.log(`Event created: ${response.data.htmlLink}`);
@@ -162,11 +201,11 @@ class GoogleService {
         }
     }
 
-    async listCalendarEvents(maxResults = 10) {
+    async listCalendarEvents(calendarId = 'primary', maxResults = 10) {
         await this.init();
         try {
             const response = await this.calendar.events.list({
-                calendarId: 'primary',
+                calendarId,
                 timeMin: (new Date()).toISOString(),
                 maxResults,
                 singleEvents: true,
@@ -179,11 +218,16 @@ class GoogleService {
         }
     }
 
-    async searchDriveFiles(query = "", pageSize = 10) {
+    async searchDriveFiles(query = "", parentId = null, pageSize = 10) {
         await this.init();
         try {
+            let q = query ? `name contains '${query}'` : "trashed = false";
+            if (parentId) {
+                q = `(${q}) and '${parentId}' in parents`;
+            }
+            
             const response = await this.drive.files.list({
-                q: query ? `name contains '${query}'` : "trashed = false",
+                q,
                 fields: 'files(id, name, mimeType, webViewLink)',
                 pageSize
             });

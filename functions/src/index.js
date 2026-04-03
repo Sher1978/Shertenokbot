@@ -6,7 +6,7 @@ const { getSecret } = require('./secrets');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { trackUsage, getDailyStats } = require('./db');
+const { trackUsage, getDailyStats, checkImageCooldown } = require('./db');
 
 // Ответ чужаку: вежливо-недоверчивый шаблон в стиле Штирлица
 const STRANGER_RESPONSES = [
@@ -27,8 +27,11 @@ const STRANGER_SILENCE = [
     'Явка провалена. Заходите в другой раз.',
 ];
 
+const OLGA_ID = '670008812';
+
 function isStranger(ctx) {
-    return OWNER_ID !== 'REPLACE_WITH_YOUR_TELEGRAM_ID' && ctx.from.id.toString() !== OWNER_ID;
+    const uid = ctx.from.id.toString();
+    return uid !== OWNER_ID && uid !== OLGA_ID;
 }
 
 function replyStranger(ctx) {
@@ -54,17 +57,27 @@ async function getBot() {
 
             // Helper for situational photos
             const sendPhotoIfNeeded = async (ctx, response) => {
+                const userId = ctx.from.id.toString();
                 const match = response.match(/\[IMAGE:\s*(\w+)\]/);
+                
                 if (match) {
                     const key = match[1];
                     const photoPath = path.join(__dirname, 'assets', `${key}.png`);
-                    if (fs.existsSync(photoPath)) {
+
+                    // Проверка кулдауна на картинку (15 минут)
+                    const canSend = await checkImageCooldown(userId, key);
+
+                    if (canSend && fs.existsSync(photoPath)) {
                         try {
                             await ctx.replyWithPhoto({ source: photoPath });
                         } catch (e) {
                             console.error(`Failed to send photo: ${key}`, e);
                         }
+                    } else if (!canSend) {
+                        console.log(`[Bot] Image ${key} is on cooldown for user ${userId}. Skipping binary send.`);
                     }
+                    
+                    // В любом случае убираем тег из текста
                     return response.replace(/\[IMAGE:\s*\w+\]/g, '').trim();
                 }
                 return response;
@@ -94,14 +107,71 @@ async function getBot() {
             // /wake — мгновенный ответ без AI, чтобы "разбудить" функцию
             botInstance.command('wake', (ctx) => ctx.reply('⚡ Штирлиц здесь! Готов к работе. Можешь писать.'));
 
+            const googleService = require('./google');
+            const db = require('./db');
+
             botInstance.start(async (ctx) => {
-                const photoPath = path.join(__dirname, 'welcome.png');
-                if (fs.existsSync(photoPath)) {
-                    await ctx.replyWithPhoto({ source: fs.createReadStream(photoPath) }, {
-                        caption: '🧥 Штирлиц смотрел на вас долгим, немигающим взглядом. \n\n— Приветствую. Я Штирлиц, ваш связной в облаке. Докладывайте обстановку.'
-                    });
-                } else {
-                    await ctx.reply('Привет! Твой системный компаньон Штирлиц. Я готов в облаке!');
+                const userId = ctx.from.id.toString();
+                if (isStranger(ctx)) return replyStranger(ctx);
+
+                try {
+                    const profile = await db.getUserProfile(userId);
+                    let welcomeMsg = "";
+                    
+                    // Инициализация папки на Диске, если её нет
+                    if (!profile.googleDriveFolderId) {
+                        try {
+                            console.log(`[Onboarding] Initializing first-time user: ${userId}`);
+                            await ctx.reply("🧥 Штирлиц подготавливает вашу явку... Секунду.");
+                            
+                            const folderName = userId === OWNER_ID ? "Stirlitz_Archive_Admin" : `Stirlitz_Archive_Kat`;
+                            const folder = await googleService.createProjectFolder(folderName);
+                            
+                            // Сохраняем ID папки сразу
+                            await db.updateUserProfile(userId, { 
+                                googleDriveFolderId: folder.id,
+                                initializedAt: new Date().toISOString()
+                            });
+                            
+                            // Создаем файл приветствия/памяти
+                            await googleService.createFile("Stirlitz_Memory.md", `# Личное дело\nДата создания: ${new Date().toISOString()}\n\nЭто ваша оперативная память.\n`, folder.id);
+                            
+                            if (userId === OLGA_ID) {
+                                welcomeMsg = "🧥 Оля, приветствую! В целях конспирации здесь я буду называть тебя Фрау Кэт (или Радистка Кэт).\n\n" +
+                                             "Я подготовил для тебя защищенную папку в облаке. Я могу:\n" +
+                                             "- Планировать твои дела (команда /tasks)\n" +
+                                             "- Вести твои проекты (/projects)\n" +
+                                             "- Сохранять документы на Google Диск\n" +
+                                             "- Следить за твоим календарем.\n\n" +
+                                             "⚠️ **Важно:** Чтобы я видел твой календарь, поделись им (режим Chmod: Просмотр) с моим сервисным адресом:\n" +
+                                             "`stirlitz-service@sarafun-f9616.iam.gserviceaccount.com`";
+                            } else {
+                                welcomeMsg = "🧥 Центр, связь установлена. Личный архив подготовлен. Готов к выполнению оперативных задач.";
+                            }
+                        } catch (initErr) {
+                            console.error(`[Onboarding] Initialization FAILED:`, initErr);
+                            return ctx.reply(`🧥 Докладываю: возникла заминка при подготовке архива. [ERR] ${initErr.message}`);
+                        }
+                    } else {
+                        welcomeMsg = userId === OLGA_ID ? "🧥 Фрау Кэт, рад снова вас слышать. Какие будут поручения?" : "🧥 Слушаю, Центр. Докладывайте обстановку.";
+                    }
+
+                    const photoPath = path.join(__dirname, 'welcome.png');
+                    if (fs.existsSync(photoPath)) {
+                        await ctx.replyWithPhoto({ source: fs.createReadStream(photoPath) }, { caption: welcomeMsg, parse_mode: 'Markdown' });
+                    } else {
+                        await ctx.reply(welcomeMsg, { parse_mode: 'Markdown' });
+                    }
+
+                    // Отправляем email сервисного аккаунта для настройки календаря (только при первом старте или по запросу)
+                    if (!profile.googleCalendarId || welcomeMsg.includes("сервисным адресом")) {
+                        const serviceAccount = JSON.parse(await getSecret('GOOGLE_SERVICE_ACCOUNT_JSON'));
+                        await ctx.reply(`📫 Адрес для доступа к календарю:\n\`${serviceAccount.client_email}\`\n\nПросто добавьте его в настройки доступа вашего Google Календаря.`, { parse_mode: 'Markdown' });
+                    }
+
+                } catch (err) {
+                    console.error("Start command error:", err);
+                    await ctx.reply("🧥 Произошла заминка при подготовке документов. Попробуйте позже.");
                 }
             });
             

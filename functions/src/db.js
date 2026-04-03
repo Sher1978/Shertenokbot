@@ -72,6 +72,27 @@ async function updateUserProfile(userId, updates) {
     await db.collection('user_profile').doc(userId).set(updates, { merge: true });
 }
 
+async function checkImageCooldown(userId, imageKey) {
+    const docRef = db.collection('user_profile').doc(userId);
+    const now = Date.now();
+    const cooldownMs = 15 * 60 * 1000;
+    
+    return await db.runTransaction(async (transaction) => {
+        const snap = await transaction.get(docRef);
+        const data = snap.exists ? snap.data() : {};
+        const cooldowns = data.imageCooldowns || {};
+        const lastTime = cooldowns[imageKey] || 0;
+        
+        if (now - lastTime < cooldownMs) {
+            return false; // На кулдауне
+        }
+        
+        cooldowns[imageKey] = now;
+        transaction.set(docRef, { imageCooldowns: cooldowns }, { merge: true });
+        return true; // Можно отправлять
+    });
+}
+
 /**
  * Трекинг использования для гостей и общего лимита
  * @param {string} userId
@@ -170,6 +191,7 @@ module.exports = {
     addHistoryBatch,
     getUserProfile,
     updateUserProfile,
+    checkImageCooldown,
     trackUsage,
     getDailyStats
 };
