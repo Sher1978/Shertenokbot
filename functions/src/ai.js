@@ -53,7 +53,7 @@ const OLGA_PERSONA = `
 
 const PROMPT_RULES = `
 СИТУАЦИОННАЯ ВИЗУАЛЬНАЯ ЛОГИКА (ОБЯЗАТЕЛЬНО):
-Ты ДОЛЖЕН сопровождать свои ответы одной из следующих меток [IMAGE: key] в начале сообщения. 
+Ты ДОЛЖЕН сопровождать свои ответы одной из следующих меток [IMAGE: key] строго в начале сообщения. 
 Мы расширили фототеку до 50+ уникальных снимков! Используй их максимально часто и разнообразно.
 
 ОСНОВНЫЕ КАТЕГОРИИ (используй любые из этих тегов):
@@ -63,7 +63,7 @@ const PROMPT_RULES = `
 - [IMAGE: crisis] — (Кризис/Напряжение) Тень, оружие, напряженный взгляд, скрытое наблюдение. Для ошибок, дедлайнов, предупреждений о рисках.
 - [IMAGE: arch] — (Архив/Документы) Старые папки, печатные машинки, официальные бланки, работа в кабинете. Для списков проектов, таблиц, сохранения файлов на Диск.
 
-ПРАВИЛО РАЗНООБРАЗИЯ: Каждое сообщение ДОЛЖНО иметь картинку. Если ты здороваешься — это [relax] или [intel]. Если ставишь задачу — это [oper]. Если показываешь список — это [arch]. 
+ПРАВИЛО РАЗНООБРАЗИЯ: Каждое сообщение ДОЛЖНО иметь картинку. Если ты здороваешься — это [IMAGE: relax] или [IMAGE: intel]. Если ставишь задачу — это [IMAGE: oper]. Если показываешь список — это [IMAGE: arch]. 
 Не бойся чередовать категории, чтобы пользователю не попадались одни и те же образы.
 
 ТВОИ ЗАДАЧИ:
@@ -71,6 +71,8 @@ const PROMPT_RULES = `
 2. Отслеживать оперативные поручения (задачи).
 3. Работать с внешней памятью (архивами) на Google Диске.
 4. Готовить отчеты и планы в папку Stirlitz_Projects.
+5. ПАМЯТЬ: Твоя внутренняя память ограничена. ВАЖНУЮ информацию (пароли, имена, детали проектов, кодовые фразы) ОБЯЗАТЕЛЬНО записывай во внешнюю память (Stirlitz_Memory.md) через инструмент sync_to_external_memory.
+6. КАЛЕНДАРЬ: После создания напоминания всегда выводи пользователю возвращенную ссылку htmlLink для подтверждения.
 `;
 
 const tools = [{
@@ -152,7 +154,7 @@ const tools = [{
         },
         {
             name: 'google_create_reminder',
-            description: 'Создает событие в Google Календаре.',
+            description: 'Создает событие в Google Календаре. Обязательно возвращай пользователю ссылку htmlLink из результата для подтверждения.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -169,7 +171,7 @@ const tools = [{
         },
         {
             name: 'sync_to_external_memory',
-            description: 'Сохраняет важную информацию, заметки или текущее состояние во внешнюю память на Google Диске (файл Stirlitz_Memory.md).',
+            description: 'Сохраняет ВАЖНУЮ информацию, которую нужно помнить долго (имена, кодовые фразы, ключевые детали проектов) в файл Stirlitz_Memory.md на Google Диске. Используй это ВСЕГДА, когда пользователь просит что-то "запомнить" или "записать в память".',
             parameters: {
                 type: 'object',
                 properties: {
@@ -203,8 +205,19 @@ const tools = [{
         },
         {
             name: 'get_stirlitz_joke',
-            description: 'Возвращает случайный анекдот про Штирлица, который еще не рассказывался (согласно памяти).',
+            description: 'Возвращает случайный анекдот про Штирлица, который еще не в черном списке.',
             parameters: { type: 'object' }
+        },
+        {
+            name: 'mark_joke_as_unfunny',
+            description: 'Помечает анекдот как "несмешной" и добавляет его в черный список для всех пользователей.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    joke_text: { type: 'string', description: 'Полный текст анекдота' }
+                },
+                required: ['joke_text']
+            }
         },
         {
             name: 'google_save_document',
@@ -223,9 +236,10 @@ const tools = [{
 }];
 
 async function processMessage(userId, message, fileData = null, currentTime = null) {
-    const [history, profile] = await Promise.all([
+    const [history, profile, globalBlacklist] = await Promise.all([
         db.getHistory(userId),
-        db.getUserProfile(userId)
+        db.getUserProfile(userId),
+        db.getGlobalBlacklist()
     ]);
 
     const userRootFolderId = profile.googleDriveFolderId || null;
@@ -374,8 +388,17 @@ async function processMessage(userId, message, fileData = null, currentTime = nu
                         }
                         finalOutput += `💾 Документ сохранен.\n`;
                     } else if (name === 'get_stirlitz_joke') {
-                        const randomIndex = Math.floor(Math.random() * STIRLITZ_JOKES.length);
-                        finalOutput += `🎭 (Анекдот): ${STIRLITZ_JOKES[randomIndex]}\n`;
+                        const { getRandomJoke } = require('./jokes');
+                        const joke = getRandomJoke(globalBlacklist);
+                        if (joke) {
+                            finalOutput += `🎭 (Анекдот): ${joke}\n`;
+                            await db.updateLastJokeTime(userId);
+                        } else {
+                            finalOutput += `🎭 (Анекдоты закончились... или все в черном списке).\n`;
+                        }
+                    } else if (name === 'mark_joke_as_unfunny') {
+                        await db.blacklistJoke(args.joke_text);
+                        finalOutput += `✅ Понял. Этот анекдот больше не будет рассказываться ни вам, ни другим.\n`;
                     }
                 } catch (toolErr) {
                     console.error(`[AI] Tool ${name} failed:`, toolErr.message);

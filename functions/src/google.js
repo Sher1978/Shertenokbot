@@ -8,49 +8,28 @@ class GoogleService {
         this.auth = null;
     }
 
-    /**
-     * PEM Doctor: Robustly normalizes and fixes private key formatting for OpenSSL 3 / Node 20.
-     */
     _standardizeKey(rawKey) {
         if (!rawKey || typeof rawKey !== 'string') {
             console.error("[PEM Doctor] Key is missing or not a string.");
             return rawKey;
         }
 
-        // 1. Basic Cleaning: Remove quotes, trim whitespace, fix common escaping
-        let clean = rawKey
-            .replace(/['"]/g, '')               // Remove any surrounding quotes
-            .replace(/\\n/g, '\n')              // Convert literal \n to real newlines
-            .replace(/\\r/g, '')                // Remove literal \r
-            .replace(/\r/g, '')                 // Remove real \r
-            .trim();
+        // 1. Extract ONLY the Base64 body
+        // We strip headers, footers, escaped newlines, and ALL whitespace.
+        const body = rawKey
+            .replace(/-----BEGIN[^-]+-----/g, '')
+            .replace(/-----END[^-]+-----/g, '')
+            .replace(/\\n/g, '')
+            .replace(/\s+/g, ''); 
 
-        // 2. Diagnostic Log (Safe part only)
-        console.log(`[PEM Doctor] Processing key of length: ${clean.length}. Start: ${clean.substring(0, 20)}...`);
-
-        // 3. Try "Washing" through native crypto first
-        try {
-            const pk = createPrivateKey(clean);
-            const washed = pk.export({ type: 'pkcs8', format: 'pem' }).toString();
-            console.log("[PEM Doctor] Key successfully washed via native crypto.");
-            return washed;
-        } catch (err) {
-            console.warn(`[PEM Doctor] Native wash failed: ${err.message}. Attempting manual reconstruction...`);
+        if (body.length < 500) {
+            console.error(`[PEM Doctor] CRITICAL: Key body too short (${body.length} chars).`);
+            return rawKey;
         }
 
-        // 4. "Nuclear Option": Manual Reconstruction
-        // Extract ONLY the base64 content between any headers/footers
-        const base64Body = clean
-            .replace(/-----BEGIN[^-]+-----/, '')
-            .replace(/-----END[^-]+-----/, '')
-            .replace(/\s/g, ''); // Remove ALL whitespace/newlines
-
-        if (base64Body.length < 500) {
-            console.error("[PEM Doctor] CRITICAL: Key body looks too short to be a valid RSA key.");
-        }
-
-        // Wrap lines at 64 characters (Standard PEM)
-        const lines = base64Body.match(/.{1,64}/g) || [];
+        // 2. Reconstruct standard PKCS#8 PEM
+        // OpenSSL 3 / Node 20 is extremely sensitive to line lengths and headers.
+        const lines = body.match(/.{1,64}/g) || [];
         const reconstructed = [
             '-----BEGIN PRIVATE KEY-----',
             ...lines,
@@ -58,14 +37,15 @@ class GoogleService {
             '' // Trailing newline
         ].join('\n');
 
-        console.log(`[PEM Doctor] Key manually reconstructed. Final length: ${reconstructed.length}`);
-        
-        // Final sanity check
+        console.log(`[PEM Doctor] Reconstructed key (Body: ${body.length}, Total: ${reconstructed.length}).`);
+
+        // 3. Final validation check
         try {
             createPrivateKey(reconstructed);
-            console.log("[PEM Doctor] Final validation PASSED.");
-        } catch (finalErr) {
-            console.error("[PEM Doctor] CRITICAL: Final validation FAILED:", finalErr.message);
+            console.log("[PEM Doctor] Key validation: SUCCESS.");
+        } catch (err) {
+            console.error("[PEM Doctor] Key validation: FAILED.", err.message);
+            // We return it anyway and hope for the best, or log diagnostic clues.
         }
 
         return reconstructed;
@@ -125,6 +105,7 @@ class GoogleService {
     async addCalendarReminder(title, startTime, calendarId = 'primary') {
         await this.init();
         try {
+            console.log(`[Google] Creating reminder: "${title}" at ${startTime} in calendar ${calendarId}`);
             const start = new Date(startTime);
             const end = new Date(start.getTime() + 60 * 60 * 1000);
 
@@ -214,6 +195,7 @@ class GoogleService {
     async updateFileContent(fileId, content) {
         await this.init();
         try {
+            console.log(`[Google] Updating file ${fileId} with ${content?.length || 0} characters.`);
             const response = await this.drive.files.update({
                 fileId,
                 media: {
@@ -231,6 +213,7 @@ class GoogleService {
     async createFile(name, content, parentId = null) {
         await this.init();
         try {
+            console.log(`[Google] Creating file "${name}" in parent ${parentId} (${content?.length || 0} chars).`);
             const fileMetadata = {
                 'name': name,
                 'mimeType': 'text/markdown'

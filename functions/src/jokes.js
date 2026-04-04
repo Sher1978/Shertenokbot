@@ -20,4 +20,22 @@ const STIRLITZ_JOKES = [
     "Штирлиц вел машину, увидел на обочине Бормана. «Голосует», — подумал Штирлиц. Через километр снова увидел Бормана. «Опять голосует», — подумал Штирлиц. К вечеру он понял, что едет по кольцевой."
 ];
 
-module.exports = { STIRLITZ_JOKES };
+/**
+ * Возвращает случайный анекдот, которого нет в черном списке
+ * @param {string[]} blacklist Список ID забаненных шуток (base64 хеши первых 50 символов)
+ * @returns {string|null}
+ */
+function getRandomJoke(blacklist = []) {
+    const available = STIRLITZ_JOKES.filter(joke => {
+        const jokeId = Buffer.from(joke).toString('base64').substring(0, 50);
+        return !blacklist.includes(jokeId);
+    });
+    
+    if (available.length === 0) return null;
+    return available[Math.floor(Math.random() * available.length)];
+}
+
+module.exports = { 
+    STIRLITZ_JOKES,
+    getRandomJoke
+};

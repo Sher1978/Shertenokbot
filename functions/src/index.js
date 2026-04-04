@@ -6,7 +6,8 @@ const { getSecret, parseJsonSecret } = require('./secrets');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { trackUsage, getDailyStats, checkImageCooldown } = require('./db');
+const { trackUsage, getDailyStats, checkImageCooldown, canSendJoke, updateLastJokeTime, getGlobalBlacklist } = require('./db');
+const { getRandomJoke } = require('./jokes');
 
 // Ответ чужаку: вежливо-недоверчивый шаблон в стиле Штирлица
 const STRANGER_RESPONSES = [
@@ -95,37 +96,35 @@ async function getBot() {
             // Helper for situational photos (updated with random library select)
             const sendPhotoIfNeeded = async (ctx, response) => {
                 const userId = ctx.from.id.toString();
-                const match = response.match(/\[IMAGE:\s*(\w+)\]/);
+                // Более гибкий поиск тега: [IMAGE: key] или просто [key]
+                const match = response.match(/\[(?:IMAGE:\s*)?(\w+)\]/i);
                 
                 if (match) {
-                    let key = match[1].toLowerCase();
-                    
-                    // Если тег старый, переводим его в категорию
-                    if (OLD_TAGS_MAP[key]) key = OLD_TAGS_MAP[key];
+                    let tag = match[1].toLowerCase();
+                    const category = OLD_TAGS_MAP[tag] || (IMAGE_GROUPS[tag] ? tag : null);
 
-                    const group = IMAGE_GROUPS[key];
-                    if (group && group.length > 0) {
-                        // Выбираем случайное изображение из группы
-                        const randomImage = group[Math.floor(Math.random() * group.length)];
-                        const photoPath = path.join(__dirname, 'assets', randomImage);
+                    if (category) {
+                        const group = IMAGE_GROUPS[category];
+                        if (group && group.length > 0) {
+                            const randomImage = group[Math.floor(Math.random() * group.length)];
+                            const photoPath = path.join(__dirname, 'assets', randomImage);
+                            const canSend = await checkImageCooldown(userId, category);
 
-                        // Проверка кулдауна на категорию (15 минут)
-                        const canSend = await checkImageCooldown(userId, key);
-
-                        if (canSend && fs.existsSync(photoPath)) {
-                            try {
-                                await ctx.replyWithPhoto({ source: photoPath });
-                                console.log(`[Bot] Sent random image ${randomImage} from category ${key}`);
-                            } catch (e) {
-                                console.error(`Failed to send photo: ${randomImage}`, e);
+                            if (canSend && fs.existsSync(photoPath)) {
+                                try {
+                                    await ctx.replyWithPhoto({ source: photoPath });
+                                    console.log(`[Bot] Sent random image ${randomImage} from category ${category}`);
+                                } catch (e) {
+                                    console.error(`Failed to send photo: ${randomImage}`, e);
+                                }
+                            } else if (!canSend) {
+                                console.log(`[Bot] Category ${category} is on cooldown for user ${userId}. Skipping binary send.`);
                             }
-                        } else if (!canSend) {
-                            console.log(`[Bot] Category ${key} is on cooldown for user ${userId}. Skipping binary send.`);
                         }
+                        
+                        // Всегда убираем тег из текста, если это был валидный тег категории
+                        return response.replace(/\[(?:IMAGE:\s*)?\w+\]/gi, '').trim();
                     }
-                    
-                    // Убираем тег из текста
-                    return response.replace(/\[IMAGE:\s*\w+\]/g, '').trim();
                 }
                 return response;
             };
@@ -287,7 +286,21 @@ async function getBot() {
                     await ctx.reply("🧥 Штирлиц, Центр сообщает: лимит бесплатных шифровок на исходе (использовано 1300 из 1500). Пора экономить.");
                 }
                 try {
-                    let response = await ai.processMessage(ctx.from.id.toString(), ctx.message.text, null, getMskTime());
+                    let userMessage = ctx.message.text;
+                    const userId = ctx.from.id.toString();
+
+                    // Проактивный юмор: проверяем кулдаун (раз в 30 мин)
+                    if (await canSendJoke(userId)) {
+                        const blacklist = await getGlobalBlacklist();
+                        const joke = getRandomJoke(blacklist);
+                        if (joke) {
+                            console.log(`[Joke] Injecting proactive joke for user ${userId}`);
+                            userMessage += `\n\n[SYSTEM: Центр требует разрядки обстановки. Расскажи этот анекдот про Штирлица в своем стиле: "${joke}"]`;
+                            await updateLastJokeTime(userId);
+                        }
+                    }
+
+                    let response = await ai.processMessage(userId, userMessage, null, getMskTime());
                     response = await sendPhotoIfNeeded(ctx, response);
                     await ctx.reply(response);
                 } catch (e) {

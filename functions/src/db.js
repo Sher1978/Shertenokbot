@@ -189,6 +189,50 @@ async function getDailyStats(dateStr) {
     };
 }
 
+/**
+ * Получает глобальный черный список анекдотов
+ * @returns {Promise<string[]>} Список текстов (или хешей) забаненных шуток
+ */
+async function getGlobalBlacklist() {
+    const snap = await getFirestoreDb().collection('jokes_blacklist').get();
+    return snap.docs.map(doc => doc.id); // Мы используем хеш/текст как ID
+}
+
+/**
+ * Добавляет шутку в глобальный черный список
+ * @param {string} jokeText 
+ */
+async function blacklistJoke(jokeText) {
+    // Используем простой хеш или нормализованный текст как ключ
+    const jokeId = Buffer.from(jokeText).toString('base64').substring(0, 50); 
+    await getFirestoreDb().collection('jokes_blacklist').doc(jokeId).set({
+        text: jokeText,
+        blacklistedAt: new Date().toISOString()
+    });
+}
+
+/**
+ * Проверяет, прошло ли достаточно времени с последней шутки (30 мин)
+ * @param {string} userId 
+ * @returns {Promise<boolean>} true если можно шутить
+ */
+async function canSendJoke(userId) {
+    const profile = await getUserProfile(userId);
+    const lastJokeTime = profile.lastJokeTime || 0;
+    const now = Date.now();
+    const interval = 30 * 60 * 1000; // 30 минут
+    
+    return (now - lastJokeTime > interval);
+}
+
+/**
+ * Обновляет время последней шутки
+ * @param {string} userId 
+ */
+async function updateLastJokeTime(userId) {
+    await updateUserProfile(userId, { lastJokeTime: Date.now() });
+}
+
 module.exports = {
     getDb,
     addTask,
@@ -201,5 +245,9 @@ module.exports = {
     updateUserProfile,
     checkImageCooldown,
     trackUsage,
-    getDailyStats
+    getDailyStats,
+    getGlobalBlacklist,
+    blacklistJoke,
+    canSendJoke,
+    updateLastJokeTime
 };

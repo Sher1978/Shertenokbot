@@ -21,14 +21,14 @@ async function getSecret(secretName) {
     if (process.env[secretName]) {
         const val = process.env[secretName];
         secretCache.set(secretName, val);
-        console.log(`[Secrets] ${secretName} from env (length: ${val.length})`);
+        console.log(`[Secrets] ${secretName} retrieved from ENVIRONMENT (length: ${val.length})`);
         return val;
     }
 
     // 2. Пробуем прямое обращение к Secret Manager
     try {
         const projectId = process.env.GCLOUD_PROJECT || 'sarafun-f9616';
-        console.log(`[Secrets] Fetching ${secretName} from Secret Manager...`);
+        console.log(`[Secrets] Fetching ${secretName} from Secret Manager (project: ${projectId})...`);
         
         const [version] = await client.accessSecretVersion({
             name: `projects/${projectId}/secrets/${secretName}/versions/latest`,
@@ -37,11 +37,12 @@ async function getSecret(secretName) {
         const value = version.payload.data.toString().trim();
         if (!value) throw new Error("Secret payload is empty");
 
+        console.log(`[Secrets] ${secretName} retrieved from SECRET MANAGER (length: ${value.length})`);
         secretCache.set(secretName, value);
         return value;
     } catch (err) {
-        console.error(`[Secrets] CRITICAL: Failed to get secret ${secretName}:`, err.message);
-        throw new Error(`Secret ${secretName} is missing or inaccessible.`);
+        console.error(`[Secrets] ERROR: Failed to get secret ${secretName}:`, err.message);
+        throw new Error(`Secret ${secretName} is missing or inaccessible: ${err.message}`);
     }
 }
 
