@@ -179,8 +179,9 @@ async function getBot() {
                                 initializedAt: new Date().toISOString()
                             });
                             
-                            // Создаем файл приветствия/памяти
+                            // Создаем файл приветствия/памяти и прошивку
                             await googleService.createFile("Stirlitz_Memory.md", `# Личное дело\nДата создания: ${new Date().toISOString()}\n\nЭто ваша оперативная память.\n`, folder.id);
+                            await googleService.createFile("Stirlitz_Core.md", `- Основная директива инициализирована.\n`, folder.id);
                             
                             if (userId === OLGA_ID) {
                                 welcomeMsg = "🧥 Оля, приветствую! В целях конспирации здесь я буду называть тебя Фрау Кэт (или Радистка Кэт).\n\n" +

@@ -183,8 +183,13 @@ class GoogleService {
                 const response = await this.drive.files.get({
                     fileId,
                     alt: 'media'
-                });
-                return typeof response.data === 'object' ? JSON.stringify(response.data) : response.data;
+                }, { responseType: 'text' });
+                // If the response is an object, try to format it, but prefer raw string.
+                if (typeof response.data === 'object') {
+                     // If it's a buffer or JSON, try to stringify. But with responseType: 'text', it should be string.
+                     return typeof response.data.toString === 'function' ? response.data.toString() : JSON.stringify(response.data);
+                }
+                return response.data;
             }
         } catch (err) {
             console.error('Error reading drive file content:', err);
@@ -199,7 +204,7 @@ class GoogleService {
             const response = await this.drive.files.update({
                 fileId,
                 media: {
-                    mimeType: 'text/plain',
+                    mimeType: 'text/markdown',
                     body: content
                 }
             });

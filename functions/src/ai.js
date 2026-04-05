@@ -132,6 +132,19 @@ const tools = [{
             }
         },
         {
+            name: 'set_stirlitz_preferences',
+            description: 'Устанавливает предпочтения пользователя для уведомлений (часовой пояс, время утреннего, дневного и вечернего отчетов).',
+            parameters: {
+                type: 'object',
+                properties: {
+                    timezone: { type: 'string', description: 'Часовой пояс (например, Europe/Moscow)' },
+                    morningTime: { type: 'string', description: 'Время утреннего отчета (HH:mm)' },
+                    afternoonTime: { type: 'string', description: 'Время дневного отчета (HH:mm)' },
+                    eveningTime: { type: 'string', description: 'Время вечернего отчета (HH:mm)' }
+                }
+            }
+        },
+        {
             name: 'google_create_folder',
             description: 'Создает папку для проекта на Google Диске.',
             parameters: {
@@ -235,6 +248,124 @@ const tools = [{
     ]
 }];
 
+/**
+ * Выполняет вызов инструмента (tool) и возвращает текст результата.
+ */
+async function executeTool(name, args, userId, profile) {
+    const userRootFolderId = profile.googleDriveFolderId || null;
+    const userCalendarId = profile.googleCalendarId || 'primary';
+
+    try {
+
+    if (name === 'add_task') {
+        const deadline = args.deadline || null;
+        await db.addTask({ ...args, userId, status: 'pending', createdAt: new Date().toISOString(), deadline });
+        return `📌 Задача "${args.title}" записана.\n`;
+    } else if (name === 'add_project') {
+        await db.addProject({ ...args, userId, updatedAt: new Date().toISOString() });
+        return `📁 Проект "${args.name}" создан.\n`;
+    } else if (name === 'update_task_status') {
+        await db.updateTaskStatus(userId, args.title, args.status);
+        return `✅ Статус задачи "${args.title}" обновлен до ${args.status}.\n`;
+    } else if (name === 'update_user_profile') {
+        await db.updateUserProfile(userId, args);
+        return `🧠 Профиль обновлен.\n`;
+    } else if (name === 'set_stirlitz_preferences') {
+        await db.updateUserProfile(userId, { notificationPrefs: args });
+        return `⚙️ Настройки уведомлений сохранены: ${JSON.stringify(args)}.\n`;
+    } else if (name === 'google_create_folder') {
+        const folder = await googleService.createProjectFolder(args.name, userRootFolderId);
+        return `☁️ Папка "${args.name}" создана (ID: ${folder.id}).\n`;
+    } else if (name === 'google_search_files') {
+        const files = await googleService.searchDriveFiles(args.query, userRootFolderId);
+        const list = files.map(f => `- ${f.name} (${f.webViewLink})`).join('\n');
+        return `🔎 Найдено:\n${list || 'Ничего.'}\n`;
+    } else if (name === 'google_create_reminder') {
+        const event = await googleService.addCalendarReminder(args.title, args.startTime, userCalendarId);
+        return `📅 Событие "${args.title}" добавлено.\n🔗 Ссылка: ${event.htmlLink}\n`;
+    } else if (name === 'google_list_events') {
+        const events = await googleService.listCalendarEvents(userCalendarId);
+        const list = events.map(e => `- ${e.summary} (${e.start.dateTime || e.start.date})`).join('\n');
+        return `🗓 Расписание:\n${list || 'Пусто.'}\n`;
+    } else if (name === 'sync_to_external_memory') {
+        const memoryFiles = await googleService.searchDriveFiles("Stirlitz_Memory.md", userRootFolderId);
+        if (memoryFiles.length > 0) {
+            let content = args.content;
+            if (args.mode === 'append') {
+                const old = await googleService.readFileContent(memoryFiles[0].id);
+                content = `${old}\n\n--- [${new Date().toISOString()}] ---\n${args.content}`;
+            }
+            await googleService.updateFileContent(memoryFiles[0].id, content);
+        } else {
+            const memoryFile = await googleService.createFile("Stirlitz_Memory.md", args.content, userRootFolderId);
+            const profileDriveIds = profile.driveFileIds || {};
+            await db.updateUserProfile(userId, { 
+                driveFileIds: { ...profileDriveIds, ["Stirlitz_Memory.md"]: memoryFile.id } 
+            });
+            fileIdCache.set(`${userId}_Stirlitz_Memory.md`, memoryFile.id);
+        }
+        return `💾 Память обновлена.\n`;
+    } else if (name === 'google_read_file_by_name') {
+        const files = await googleService.searchDriveFiles(args.fileName, userRootFolderId);
+        if (files.length > 0) {
+            const content = await googleService.readFileContent(files[0].id);
+            return `📖 Файл "${args.fileName}":\n\n${content}\n`;
+        } else {
+            return `⚠️ Не найден.\n`;
+        }
+    } else if (name === 'google_save_document') {
+        const folders = await googleService.searchDriveFiles("Stirlitz_Projects", userRootFolderId);
+        let folderId = folders.length > 0 ? folders[0].id : (await googleService.createProjectFolder("Stirlitz_Projects", userRootFolderId)).id;
+        const files = await googleService.searchDriveFiles(args.name, folderId);
+        if (files.length > 0) {
+            let content = args.content;
+            if (args.mode === 'append') {
+                const old = await googleService.readFileContent(files[0].id);
+                content = `${old}\n\n${args.content}`;
+            }
+            await googleService.updateFileContent(files[0].id, content);
+        } else {
+            await googleService.createFile(args.name, args.content, folderId);
+        }
+        return `💾 Документ сохранен.\n`;
+    } else if (name === 'get_stirlitz_joke') {
+        const { getRandomJoke } = require('./jokes');
+        const { getGlobalBlacklist } = require('./db');
+        const blacklist = await getGlobalBlacklist();
+        const joke = getRandomJoke(blacklist);
+        if (joke) {
+            await db.updateLastJokeTime(userId);
+            return `🎭 (Анекдот): ${joke}\n`;
+        } else {
+            return `🎭 (Анекдоты закончились... или все в черном списке).\n`;
+        }
+    } else if (name === 'mark_joke_as_unfunny') {
+        await db.blacklistJoke(args.joke_text);
+        return `✅ Понял. Этот анекдот больше не будет рассказываться ни вам, ни другим.\n`;
+    } else if (name === 'update_firmware') {
+        const coreFiles = await googleService.searchDriveFiles("Stirlitz_Core.md", userRootFolderId);
+        if (coreFiles.length > 0) {
+            const old = await googleService.readFileContent(coreFiles[0].id);
+            const content = `${old}\n\n- ${args.newRule}`;
+            await googleService.updateFileContent(coreFiles[0].id, content);
+        } else {
+            const coreFile = await googleService.createFile("Stirlitz_Core.md", `- ${args.newRule}`, userRootFolderId);
+            const profileDriveIds = profile.driveFileIds || {};
+            await db.updateUserProfile(userId, { 
+                driveFileIds: { ...profileDriveIds, ["Stirlitz_Core.md"]: coreFile.id } 
+            });
+            fileIdCache.set(`${userId}_Stirlitz_Core.md`, coreFile.id);
+        }
+        return `⚙️ Прошивка обновлена.\n`;
+    }
+    return `⚠️ Неизвестный инструмент ${name}.\n`;
+    } catch (error) {
+        console.error(`[Tool Execution Error] ${name}:`, error);
+        return `⚠️ Ошибка выполнения ${name}: ${error.message}\n`;
+    }
+}
+
+
 async function processMessage(userId, message, fileData = null, currentTime = null) {
     const [history, profile, globalBlacklist] = await Promise.all([
         db.getHistory(userId),
@@ -326,84 +457,8 @@ async function processMessage(userId, message, fileData = null, currentTime = nu
             if (part.functionCall) {
                 const { name, args } = part.functionCall;
                 console.log(`[AI] Function Call: ${name}`, args);
-
-                try {
-                    if (name === 'add_task') {
-                        await db.addTask({ ...args, userId, status: 'pending', createdAt: new Date().toISOString() });
-                        finalOutput += `📌 Задача "${args.title}" записана.\n`;
-                    } else if (name === 'add_project') {
-                        await db.addProject({ ...args, userId, updatedAt: new Date().toISOString() });
-                        finalOutput += `📁 Проект "${args.name}" создан.\n`;
-                    } else if (name === 'update_user_profile') {
-                        await db.updateUserProfile(userId, args);
-                        finalOutput += `🧠 Профиль обновлен.\n`;
-                    } else if (name === 'google_create_folder') {
-                        const folder = await googleService.createProjectFolder(args.name, userRootFolderId);
-                        finalOutput += `☁️ Папка "${args.name}" создана (ID: ${folder.id}).\n`;
-                    } else if (name === 'google_search_files') {
-                        const files = await googleService.searchDriveFiles(args.query, userRootFolderId);
-                        const list = files.map(f => `- ${f.name} (${f.webViewLink})`).join('\n');
-                        finalOutput += `🔎 Найдено:\n${list || 'Ничего.'}\n`;
-                    } else if (name === 'google_create_reminder') {
-                        const event = await googleService.addCalendarReminder(args.title, args.startTime, userCalendarId);
-                        finalOutput += `📅 Событие "${args.title}" добавлено.\n🔗 Ссылка: ${event.htmlLink}\n`;
-                    } else if (name === 'google_list_events') {
-                        const events = await googleService.listCalendarEvents(userCalendarId);
-                        const list = events.map(e => `- ${e.summary} (${e.start.dateTime || e.start.date})`).join('\n');
-                        finalOutput += `🗓 Расписание:\n${list || 'Пусто.'}\n`;
-                    } else if (name === 'sync_to_external_memory') {
-                        const memoryFiles = await googleService.searchDriveFiles("Stirlitz_Memory.md", userRootFolderId);
-                        if (memoryFiles.length > 0) {
-                            let content = args.content;
-                            if (args.mode === 'append') {
-                                const old = await googleService.readFileContent(memoryFiles[0].id);
-                                content = `${old}\n\n--- [${new Date().toISOString()}] ---\n${args.content}`;
-                            }
-                            await googleService.updateFileContent(memoryFiles[0].id, content);
-                        } else {
-                            await googleService.createFile("Stirlitz_Memory.md", args.content, userRootFolderId);
-                        }
-                        finalOutput += `💾 Память обновлена.\n`;
-                    } else if (name === 'google_read_file_by_name') {
-                        const files = await googleService.searchDriveFiles(args.fileName, userRootFolderId);
-                        if (files.length > 0) {
-                            const content = await googleService.readFileContent(files[0].id);
-                            finalOutput += `📖 Файл "${args.fileName}":\n\n${content}\n`;
-                        } else {
-                            finalOutput += `⚠️ Не найден.\n`;
-                        }
-                    } else if (name === 'google_save_document') {
-                        const folders = await googleService.searchDriveFiles("Stirlitz_Projects", userRootFolderId);
-                        let folderId = folders.length > 0 ? folders[0].id : (await googleService.createProjectFolder("Stirlitz_Projects", userRootFolderId)).id;
-                        const files = await googleService.searchDriveFiles(args.name, folderId);
-                        if (files.length > 0) {
-                            let content = args.content;
-                            if (args.mode === 'append') {
-                                const old = await googleService.readFileContent(files[0].id);
-                                content = `${old}\n\n${args.content}`;
-                            }
-                            await googleService.updateFileContent(files[0].id, content);
-                        } else {
-                            await googleService.createFile(args.name, args.content, folderId);
-                        }
-                        finalOutput += `💾 Документ сохранен.\n`;
-                    } else if (name === 'get_stirlitz_joke') {
-                        const { getRandomJoke } = require('./jokes');
-                        const joke = getRandomJoke(globalBlacklist);
-                        if (joke) {
-                            finalOutput += `🎭 (Анекдот): ${joke}\n`;
-                            await db.updateLastJokeTime(userId);
-                        } else {
-                            finalOutput += `🎭 (Анекдоты закончились... или все в черном списке).\n`;
-                        }
-                    } else if (name === 'mark_joke_as_unfunny') {
-                        await db.blacklistJoke(args.joke_text);
-                        finalOutput += `✅ Понял. Этот анекдот больше не будет рассказываться ни вам, ни другим.\n`;
-                    }
-                } catch (toolErr) {
-                    console.error(`[AI] Tool ${name} failed:`, toolErr.message);
-                    finalOutput += `⚠️ Ошибка выполнения ${name}.\n`;
-                }
+                const result = await executeTool(name, args, userId, profile);
+                finalOutput += result;
             } else if (part.text) {
                 finalOutput += part.text;
             }
@@ -420,4 +475,46 @@ async function processMessage(userId, message, fileData = null, currentTime = nu
     }
 }
 
-module.exports = { processMessage, OWNER_ID, OLGA_ID };
+/**
+ * Генерирует проактивное сообщение (приветствие, отчет, напоминание).
+ */
+async function generateProactiveMessage(userId, proactiveContext) {
+    const [profile, globalBlacklist] = await Promise.all([
+        db.getUserProfile(userId),
+        db.getGlobalBlacklist()
+    ]);
+
+    const persona = userId === OLGA_ID ? OLGA_PERSONA : ADMIN_PERSONA;
+    const dynamicPrompt = `${BASE_PROMPT}${persona}${PROMPT_RULES}\n\nКОНТЕКСТ ПОЛЬЗОВАТЕЛЯ:\n${JSON.stringify(profile, null, 2)}`;
+    
+    let userGoal = "";
+    if (proactiveContext.type === 'morning') userGoal = "Поприветствуй пользователя утром. Будь лаконичен, создай боевой настрой. Упомяни, что ты на посту.";
+    if (proactiveContext.type === 'afternoon') userGoal = "Дневной контакт. Спроси как проходит операция (дела).";
+    if (proactiveContext.type === 'evening') userGoal = "Вечерний доклад. Подведи итоги дня (если есть задачи) или просто пожелай спокойной ночи офицеру разведки.";
+    if (proactiveContext.type === 'audit') {
+        userGoal = `ПРОВЕРКА ДЕДЛАЙНОВ. Проанализируй задачи и напомни о тех, чей срок подходит.\nЗадачи: ${JSON.stringify(proactiveContext.tasks)}`;
+    }
+
+    const combinedPrompt = `${dynamicPrompt}\n\nТВОЯ ЗАДАЧА СЕЙЧАС (ПРОАКТИВНОСТЬ):\n${userGoal}\n\nНапиши сообщение от лица Штирлица.`;
+
+    try {
+        const genAIInstance = await getAI();
+        const model = genAIInstance.getGenerativeModel({ model: "gemini-2.0-flash" });
+        const result = await model.generateContent({ contents: [{ role: 'user', parts: [{ text: combinedPrompt }] }] });
+        const text = result.response.text();
+        
+        // Сохраняем в историю
+        await db.addHistoryBatch(userId, [
+            { role: 'user', parts: [{ text: `[SYSTEM: Proactive Trigger ${proactiveContext.type}]` }] },
+            { role: 'model', parts: [{ text }] }
+        ]);
+
+        return text;
+    } catch (e) {
+        console.error("[AI] Proactive error:", e.message);
+        return null;
+    }
+}
+
+module.exports = { processMessage, generateProactiveMessage, OWNER_ID, OLGA_ID };
+

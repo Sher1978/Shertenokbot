@@ -77,7 +77,33 @@ async function getUserProfile(userId) {
 }
 
 async function updateUserProfile(userId, updates) {
+    if (updates.chatId) {
+        console.log(`[DB] Updating chatId for user ${userId}: ${updates.chatId}`);
+    }
     await getFirestoreDb().collection('user_profile').doc(userId).set(updates, { merge: true });
+}
+
+/**
+ * Получает все профили пользователей (для планировщика)
+ * @returns {Promise<Object[]>}
+ */
+async function getAllUserProfiles() {
+    const snap = await getFirestoreDb().collection('user_profile').get();
+    return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
+
+/**
+ * Получает задачи пользователя по статусу
+ * @param {string} userId 
+ * @param {string} status 'pending' или 'completed'
+ * @returns {Promise<Object[]>}
+ */
+async function getTasksByStatus(userId, status = 'pending') {
+    const snap = await getFirestoreDb().collection('tasks')
+        .where('userId', '==', userId)
+        .where('status', '==', status)
+        .get();
+    return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 }
 
 async function checkImageCooldown(userId, imageKey) {
@@ -198,13 +224,15 @@ async function getGlobalBlacklist() {
     return snap.docs.map(doc => doc.id); // Мы используем хеш/текст как ID
 }
 
+const crypto = require('crypto');
+
 /**
  * Добавляет шутку в глобальный черный список
  * @param {string} jokeText 
  */
 async function blacklistJoke(jokeText) {
-    // Используем простой хеш или нормализованный текст как ключ
-    const jokeId = Buffer.from(jokeText).toString('base64').substring(0, 50); 
+    // Используем безопасный гексадецимальный хеш как ключ (base64 может содержать '/', ломающий пути Firestore)
+    const jokeId = crypto.createHash('sha256').update(jokeText).digest('hex');
     await getFirestoreDb().collection('jokes_blacklist').doc(jokeId).set({
         text: jokeText,
         blacklistedAt: new Date().toISOString()
@@ -249,5 +277,7 @@ module.exports = {
     getGlobalBlacklist,
     blacklistJoke,
     canSendJoke,
-    updateLastJokeTime
+    updateLastJokeTime,
+    getAllUserProfiles,
+    getTasksByStatus
 };
