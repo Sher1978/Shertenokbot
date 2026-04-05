@@ -1,12 +1,20 @@
 const { onRequest } = require('firebase-functions/v2/https');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { Telegraf } = require('telegraf');
 const ai = require('./ai');
 const { OWNER_ID } = require('./ai');
-const { getSecret, parseJsonSecret } = require('./secrets');
+const { getSecret } = require('./secrets');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { trackUsage, getDailyStats, checkImageCooldown, canSendJoke, updateLastJokeTime, getGlobalBlacklist } = require('./db');
+const { 
+    trackUsage, 
+    checkImageCooldown, 
+    updateLastJokeTime, 
+    getAllUserProfiles, 
+    getTasksDueSoon, 
+    updateUserProfile 
+} = require('./db');
 const { getRandomJoke } = require('./jokes');
 
 // Ответ чужаку: вежливо-недоверчивый шаблон в стиле Штирлица
@@ -289,6 +297,10 @@ async function getBot() {
                 try {
                     let userMessage = ctx.message.text;
                     const userId = ctx.from.id.toString();
+                    const chatId = ctx.chat.id.toString();
+
+                    // Сохраняем/обновляем chatId для проактивных уведомлений
+                    await updateUserProfile(userId, { chatId });
 
                     // Проактивный юмор: проверяем кулдаун (раз в 30 мин)
                     if (await canSendJoke(userId)) {
@@ -333,6 +345,10 @@ async function getBot() {
                 }
                 try {
                     await ctx.reply("Секунду, изучаю документ...");
+                    const userId = ctx.from.id.toString();
+                    const chatId = ctx.chat.id.toString();
+                    await updateUserProfile(userId, { chatId });
+
                     const fileId = ctx.message.document.file_id;
                     const mimeType = ctx.message.document.mime_type;
                     const base64 = await downloadFile(fileId);
@@ -368,6 +384,10 @@ async function getBot() {
                 }
                 try {
                     await ctx.reply("Смотри внимательно...");
+                    const userId = ctx.from.id.toString();
+                    const chatId = ctx.chat.id.toString();
+                    await updateUserProfile(userId, { chatId });
+
                     // Берем самое крупное фото
                     const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
                     const base64 = await downloadFile(fileId);
@@ -476,4 +496,55 @@ exports.bot = onRequest({
     }
 });
 
+// --- ПРОАКТИВНЫЙ ПЛАНИРОВЩИК (SCHEDULER) ---
+// Запускается каждый час для проверки дедлайнов и подготовки сводок.
+exports.scheduledMessenger = onSchedule({
+    schedule: "0 * * * *", // Раз в час
+    timeZone: "Europe/Moscow",
+    memory: "512MiB",
+    secrets: ["GEMINI_API_KEY", "TELEGRAM_BOT_TOKEN", "GOOGLE_SERVICE_ACCOUNT_JSON"]
+}, async (event) => {
+    console.log("[Scheduler] Tick started at:", new Date().toISOString());
+    const bot = await getBot();
+    const users = await getAllUserProfiles();
+    
+    // Получаем текущий час в МСК
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('ru-RU', { hour: 'numeric', timeZone: 'Europe/Moscow', hour12: false });
+    const currentHour = parseInt(formatter.format(now));
+    
+    for (const user of users) {
+        if (!user.chatId) continue;
+        const userId = user.id;
 
+        try {
+            // 1. ПРОВЕРКА ДЕДЛАЙНОВ (Каждый час)
+            const dueTasks = await getTasksDueSoon(userId, 2);
+            if (dueTasks.length > 0) {
+                const taskTitles = dueTasks.map(t => `«${t.title}»`).join(', ');
+                const remindPrompt = `[SYSTEM: Центр сообщает, что дедлайны по задачам (${taskTitles}) подходят к концу (осталось менее 2 часов). Подготовь оперативное напоминание.]`;
+                
+                const response = await ai.processMessage(userId, remindPrompt, null, getMskTime());
+                await bot.telegram.sendMessage(user.chatId, response);
+                console.log(`[Scheduler] Deadline reminder sent to ${userId}`);
+            }
+
+            // 2. ОПЕРАТИВНЫЕ СВОДКИ (10:00, 14:00, 21:00 по МСК)
+            let summaryType = null;
+            if (currentHour === 10) summaryType = "УТРЕННЯЯ ПРИВЕТСТВЕННАЯ СВОДКА (планы на день)";
+            else if (currentHour === 14) summaryType = "ОБЕДЕННЫЙ СТАТУС (промежуточные итоги)";
+            else if (currentHour === 21) summaryType = "ВЕЧЕРНИЙ ОТЧЕТ (итоги дня и планы на завтра)";
+
+            if (summaryType) {
+                const summaryPrompt = `[SYSTEM: Пришло время для регулярной активности: ${summaryType}. Обратись к пользователю в своем стиле, подведи итоги или обозначь планы на день на основе данных из памяти.]`;
+                const response = await ai.processMessage(userId, summaryPrompt, null, getMskTime());
+                await bot.telegram.sendMessage(user.chatId, response);
+                console.log(`[Scheduler] ${summaryType} sent to ${userId}`);
+            }
+
+        } catch (err) {
+            console.error(`[Scheduler] Failed to process user ${userId}:`, err);
+        }
+    }
+    console.log("[Scheduler] Tick finished.");
+});

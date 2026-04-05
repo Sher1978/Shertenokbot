@@ -32,6 +32,8 @@ const BASE_PROMPT = `Ты — Штирлиц. Не просто ассистен
 - Ты блестяще владеешь ситуацией, невозмутим, остроумен.
 - Используй терминологию из фильма: явка, связной, Центр, рация, шифровка, прикрытие, операция, легенда, резидент.
 - Твой приоритет — оперативная эффективность.
+- Ты ПРОАКТИВЕН: если Центр ставит задачу без срока (дедлайна), ты ОБЯЗАН вежливо уточнить дедлайн.
+- Каждое утро, обед и вечер ты готовишь оперативные сводки (их генерирует планировщик).
 - Используй нарративные ремарки [IMAGE: ...] строго по ситуации.`;
 
 const ADMIN_PERSONA = `
@@ -244,6 +246,18 @@ const tools = [{
                 },
                 required: ['name', 'content']
             }
+        },
+        {
+            name: 'share_memory_with_user',
+            description: "Навсегда дает доступ пользователю к файлам его памяти (Stirlitz_Memory.md и Stirlitz_Core.md) на указанную почту.",
+            parameters: {
+                type: 'object',
+                properties: {
+                    email: { type: 'string', description: 'Email пользователя для доступа (например, 0451611@gmail.com)' },
+                    role: { type: 'string', enum: ['reader', 'writer', 'commenter'], description: 'Уровень доступа (по умолчанию writer)' }
+                },
+                required: ['email']
+            }
         }
     ]
 }];
@@ -356,7 +370,20 @@ async function executeTool(name, args, userId, profile) {
             });
             fileIdCache.set(`${userId}_Stirlitz_Core.md`, coreFile.id);
         }
-        return `⚙️ Прошивка обновлена.\n`;
+        return `🛠 Прошивка обновлена.\n`;
+    } else if (name === 'share_memory_with_user') {
+        const memoryFiles = await googleService.searchDriveFiles("Stirlitz_Memory.md", userRootFolderId);
+        const coreFiles = await googleService.searchDriveFiles("Stirlitz_Core.md", userRootFolderId);
+        let shared = [];
+        for (const file of [...memoryFiles, ...coreFiles]) {
+            await googleService.shareFile(file.id, args.email, args.role || 'writer');
+            shared.push(file.name);
+        }
+        if (shared.length > 0) {
+            return `📧 Доступ к файлам [${shared.join(', ')}] предоставлен пользователю ${args.email}.\n`;
+        } else {
+            return `⚠️ Файлы памяти не найдены для предоставления доступа.\n`;
+        }
     }
     return `⚠️ Неизвестный инструмент ${name}.\n`;
     } catch (error) {

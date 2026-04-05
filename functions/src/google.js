@@ -14,41 +14,62 @@ class GoogleService {
             return rawKey;
         }
 
-        // 1. Extract ONLY the Base64 body
-        // We strip headers, footers, escaped newlines, and ALL whitespace.
-        const body = rawKey
+        console.log(`[PEM Doctor] Standardizing key of length: ${rawKey.length}`);
+
+        // 1. Normalize line endings and literal escape characters
+        let key = rawKey.replace(/\\n/g, '\n').replace(/\\r/g, '');
+
+        // 2. Extract ONLY the base64 content
+        // We remove headers, then strip EVERY character that isn't valid base64 (A-Z, a-z, 0-9, +, /, =)
+        let body = key
             .replace(/-----BEGIN[^-]+-----/g, '')
             .replace(/-----END[^-]+-----/g, '')
-            .replace(/\\n/g, '')
-            .replace(/\s+/g, ''); 
+            .replace(/[^a-zA-Z0-9+/=]/g, ''); 
 
         if (body.length < 500) {
-            console.error(`[PEM Doctor] CRITICAL: Key body too short (${body.length} chars).`);
-            return rawKey;
+            console.error(`[PEM Doctor] CRITICAL: Body too short after cleanup (${body.length} chars). Original: ${rawKey.length}`);
+            return key;
         }
 
-        // 2. Reconstruct standard PKCS#8 PEM
-        // OpenSSL 3 / Node 20 is extremely sensitive to line lengths and headers.
+        // 3. Reconstruct into standard 64-char wrapped lines
         const lines = body.match(/.{1,64}/g) || [];
-        const reconstructed = [
+        
+        // Strategy A: PKCS#8 (Standard for Google Service Accounts)
+        const pkcs8 = [
             '-----BEGIN PRIVATE KEY-----',
             ...lines,
             '-----END PRIVATE KEY-----',
-            '' // Trailing newline
+            ''
         ].join('\n');
 
-        console.log(`[PEM Doctor] Reconstructed key (Body: ${body.length}, Total: ${reconstructed.length}).`);
-
-        // 3. Final validation check
+        const { createPrivateKey } = require('crypto');
         try {
-            createPrivateKey(reconstructed);
-            console.log("[PEM Doctor] Key validation: SUCCESS.");
+            createPrivateKey(pkcs8);
+            console.log(`[PEM Doctor] Validation: SUCCESS (PKCS#8). Body: ${body.length}`);
+            return pkcs8;
         } catch (err) {
-            console.error("[PEM Doctor] Key validation: FAILED.", err.message);
-            // We return it anyway and hope for the best, or log diagnostic clues.
+            console.warn(`[PEM Doctor] PKCS#8 validation failed: ${err.message}. Trying PKCS#1...`);
         }
 
-        return reconstructed;
+        // Strategy B: PKCS#1 (RSA Private Key)
+        const pkcs1 = [
+            '-----BEGIN RSA PRIVATE KEY-----',
+            ...lines,
+            '-----END RSA PRIVATE KEY-----',
+            ''
+        ].join('\n');
+
+        try {
+            createPrivateKey(pkcs1);
+            console.log(`[PEM Doctor] Validation: SUCCESS (PKCS#1). Body: ${body.length}`);
+            return pkcs1;
+        } catch (err) {
+            console.error(`[PEM Doctor] PKCS#1 validation failed: ${err.message}.`);
+        }
+
+        // Final Fallback: Return original with only newline normalization
+        console.warn("[PEM Doctor] Reconstructions failed. Using raw unescaped input.");
+        return key;
     }
 
     async init() {
@@ -64,6 +85,7 @@ class GoogleService {
             throw new Error("[Google] Failed to extract private_key from secret.");
         }
 
+        // Use the robust standardization
         const normalizedPem = this._standardizeKey(serviceAccount.private_key);
 
         this.auth = new JWT({
@@ -78,6 +100,27 @@ class GoogleService {
         this.drive = google.drive({ version: 'v3', auth: this.auth });
         this.calendar = google.calendar({ version: 'v3', auth: this.auth });
         console.log(`[Google] Service authorized as: ${serviceAccount.client_email}`);
+    }
+
+    async shareFile(fileId, email, role = 'writer') {
+        await this.init();
+        try {
+            console.log(`[Google] Sharing file ${fileId} with ${email} (role: ${role})...`);
+            const response = await this.drive.permissions.create({
+                fileId,
+                sendNotificationEmail: true,
+                resource: {
+                    type: 'user',
+                    role,
+                    emailAddress: email
+                }
+            });
+            console.log(`[Google] Permission created: ${response.data.id}`);
+            return response.data;
+        } catch (err) {
+            console.error('[Google] Error sharing file:', err.message);
+            throw err;
+        }
     }
 
     async createProjectFolder(projectName, parentId = null) {

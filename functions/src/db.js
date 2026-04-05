@@ -261,6 +261,30 @@ async function updateLastJokeTime(userId) {
     await updateUserProfile(userId, { lastJokeTime: Date.now() });
 }
 
+/**
+ * Получает задачи, дедлайн которых наступает в ближайшие N часов
+ * @param {string} userId 
+ * @param {number} hours 
+ * @returns {Promise<Object[]>}
+ */
+async function getTasksDueSoon(userId, hours = 24) {
+    const now = new Date();
+    const future = new Date(now.getTime() + hours * 60 * 60 * 1000);
+    
+    const snap = await getFirestoreDb().collection('tasks')
+        .where('userId', '==', userId)
+        .where('status', '==', 'pending')
+        .get();
+    
+    return snap.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter(task => {
+            if (!task.deadline) return false;
+            const d = new Date(task.deadline);
+            return d > now && d < future;
+        });
+}
+
 module.exports = {
     getDb,
     addTask,
@@ -279,5 +303,6 @@ module.exports = {
     canSendJoke,
     updateLastJokeTime,
     getAllUserProfiles,
-    getTasksByStatus
+    getTasksByStatus,
+    getTasksDueSoon
 };
